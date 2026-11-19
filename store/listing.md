@@ -38,6 +38,7 @@ WHAT IT DOES
 • Shows who is talking: the author or publishing organization, the date, and a five-bar reputation meter for the source. Hover over the meter to see what the rating means and why. The rating is an estimate made by the AI, not a verified score.
 • Remembers. Peek at the same page again and the saved summary appears at once, as long as the page has not changed.
 • Works on pages that need JavaScript and on PDFs.
+• Five designs: Light, Dark, Color-blind safe, Paper and Midnight.
 • Your format. One plain-language prompt controls length, bullets or prose, language and tone.
 
 HOW TO USE IT

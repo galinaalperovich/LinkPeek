@@ -40,6 +40,9 @@
     stop: ['M8 8h8v8H8z'],
   };
 
+  const THEMES = new Set(['light', 'dark', 'vision', 'paper', 'midnight']);
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)');
+  let theme = 'auto'; // the reader's choice; 'auto' follows the system
   let trigger = DEFAULT_TRIGGER;
   let bubble = null;
   let lastContext = null; // where the context menu was last opened
@@ -242,6 +245,7 @@
 
       this.panel = h('div', { class: 'lp', role: 'dialog', 'aria-label': 'LinkPeek summary' }, this.head, this.body, this.form);
       this.root.append(this.panel, this.tipEl);
+      this.applyTheme();
 
       closeBtn.addEventListener('click', () => this.close());
       this.repEl.addEventListener('mouseenter', () => this.showTip());
@@ -270,6 +274,13 @@
       } catch {
         // Plain z-index it is.
       }
+    }
+
+    // The design is one class, on the panel and on the hover card beside it.
+    applyTheme() {
+      const name = THEMES.has(theme) ? theme : prefersDark.matches ? 'dark' : 'light';
+      this.panel.className = `lp lp-t-${name}`;
+      this.tipEl.className = `lp-tip lp-t-${name}`;
     }
 
     // Next to the link: below it when there is room, above it otherwise.
@@ -518,7 +529,11 @@
       const { label, tone, means } = known;
       const bars = [1, 2, 3, 4, 5].map((n) => h('i', { class: n <= rating.level ? 'on' : null }));
       this.repEl.className = `lp-rep lp-rep-${tone}`;
-      this.repEl.replaceChildren(h('span', { class: 'lp-meter', 'aria-hidden': 'true' }, ...bars), label);
+      this.repEl.replaceChildren(
+        h('span', { class: 'lp-meter', 'aria-hidden': 'true' }, ...bars),
+        h('span', { class: 'lp-rep-label', text: label }),
+        rating.level ? h('span', { class: 'lp-rep-score', text: `${rating.level}/5` }) : null,
+      );
       const score = rating.level ? `${rating.level} of 5` : '';
       const why = rating.reason ? `Why: ${rating.reason}.` : '';
       this.tipEl.replaceChildren(
@@ -917,7 +932,14 @@
   }
 
   function onStorageChanged(changes, area) {
-    if (area === 'sync' && changes.trigger) setTrigger(changes.trigger.newValue);
+    if (area !== 'sync') return;
+    if (changes.trigger) setTrigger(changes.trigger.newValue);
+    if (changes.theme) setTheme(changes.theme.newValue);
+  }
+
+  function setTheme(value) {
+    theme = THEMES.has(value) ? value : 'auto';
+    bubble?.applyTheme(); // an open bubble changes design on the spot
   }
 
   function setTrigger(value) {
@@ -954,9 +976,13 @@
   // A key released while another window had focus never sends keyup.
   listen(window, 'blur', (event) => event.target === window && held.clear(), true);
   listen(document, 'visibilitychange', () => held.clear(), false);
+  listen(prefersDark, 'change', () => bubble?.applyTheme(), false); // "Auto" follows the system live
 
   try {
-    chrome.storage.sync.get({ trigger: DEFAULT_TRIGGER }).then((stored) => setTrigger(stored.trigger), () => {});
+    chrome.storage.sync.get({ trigger: DEFAULT_TRIGGER, theme: 'auto' }).then((stored) => {
+      setTrigger(stored.trigger);
+      setTheme(stored.theme);
+    }, () => {});
     chrome.storage.onChanged.addListener(onStorageChanged);
     chrome.runtime.onMessage.addListener(onMessage);
   } catch {

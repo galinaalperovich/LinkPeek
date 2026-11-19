@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { SUMMARIZE_REQUEST, buildMessages, buildSystem } from '../../src/lib/prompts.js';
 import {
+  THEMES,
   DEFAULT_FORMAT,
   DEFAULT_TRIGGER,
   PROVIDERS,
@@ -135,4 +136,12 @@ test('page bytes are decoded with the charset the page declares', () => {
 
   assert.equal(decodeText(new TextEncoder().encode('héllo'), 'text/html'), 'héllo');
   assert.equal(decodeText(new TextEncoder().encode('ok'), 'text/html; charset=not-a-charset'), 'ok');
+});
+
+test('five designs plus "Auto", each with a label, a hint and picker colours', () => {
+  assert.deepEqual(THEMES.map((theme) => theme.id), ['auto', 'light', 'dark', 'vision', 'paper', 'midnight']);
+  for (const theme of THEMES) {
+    assert.ok(theme.label && theme.hint, theme.id);
+    if (theme.id !== 'auto') assert.equal(theme.swatch.length, 3, theme.id);
+  }
 });

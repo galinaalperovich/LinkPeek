@@ -43,6 +43,21 @@ export const FORMAT_PRESETS = [
 export const DEFAULT_FORMAT = FORMAT_PRESETS[0].prompt;
 export const MAX_FORMAT_CHARS = 4000;
 
+/**
+ * The bubble's designs. `auto` follows the system: Light or Dark. The swatch
+ * colours are only for the picker in the settings; the designs themselves are
+ * defined in ui/bubble-css.js.
+ */
+export const THEMES = [
+  { id: 'auto', label: 'Auto', hint: 'Light or Dark, following your system' },
+  { id: 'light', label: 'Light', hint: 'Clean white with an amber accent', swatch: ['#ffffff', '#1b1c1f', '#f5a524'] },
+  { id: 'dark', label: 'Dark', hint: 'Graphite with an amber accent', swatch: ['#1f2024', '#e6e6e9', '#f5a524'] },
+  { id: 'vision', label: 'Color-blind safe', hint: 'Blue and orange, numbers next to colors, stronger contrast', swatch: ['#ffffff', '#101216', '#0072b2'] },
+  { id: 'paper', label: 'Paper', hint: 'Warm page, book typeface', swatch: ['#fbf6ea', '#33291f', '#b4532a'] },
+  { id: 'midnight', label: 'Midnight', hint: 'Frosted navy glass with a violet glow', swatch: ['#151936', '#d9defa', '#8b7bff'] },
+];
+const THEME_IDS = THEMES.map((theme) => theme.id);
+
 /** Hold this key (or modifier) and click a link to peek at it. */
 export const DEFAULT_TRIGGER = Object.freeze({ kind: 'key', code: 'KeyX', label: 'X' });
 
@@ -81,6 +96,7 @@ const PREF_DEFAULTS = {
   format: DEFAULT_FORMAT,
   trigger: DEFAULT_TRIGGER,
   reputation: true, // show the model's estimate of how trustworthy the source is
+  theme: 'auto', // one of THEMES
 };
 
 export const DEFAULTS = { ...SECRET_DEFAULTS, ...PREF_DEFAULTS };
@@ -129,6 +145,7 @@ function normalize(raw) {
     format: (format || DEFAULT_FORMAT).slice(0, MAX_FORMAT_CHARS),
     trigger: normalizeTrigger(raw.trigger),
     reputation: raw.reputation !== false,
+    theme: THEME_IDS.includes(raw.theme) ? raw.theme : 'auto',
   };
 }
 

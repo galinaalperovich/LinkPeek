@@ -10,7 +10,7 @@
 
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -64,7 +64,11 @@ const BUBBLE_STATE = `(() => {
     sub: [b.hostEl.textContent, b.factsEl.textContent].filter(Boolean).join(' '),
     credit: b.creditEl.hidden ? '' : b.creditEl.textContent,
     reputation: b.repEl.hidden ? null : {
-      label: b.repEl.textContent,
+      label: b.repEl.querySelector('.lp-rep-label').textContent,
+      score: (() => {
+        const el = b.repEl.querySelector('.lp-rep-score'); // absent for "Unknown"
+        return el && getComputedStyle(el).display !== 'none' ? el.textContent : '';
+      })(),
       bars: b.repEl.querySelectorAll('.lp-meter i.on').length,
       tone: b.repEl.className,
       aria: b.repEl.getAttribute('aria-label'),
@@ -87,6 +91,10 @@ const BUBBLE_STATE = `(() => {
     head: { x: panel.x + 150, y: panel.y + 20 },
     panel: { x: panel.x, y: panel.y, width: panel.width, height: panel.height },
     topLayer: b.host.matches(':popover-open'),
+    theme: b.panel.className,
+    tipTheme: b.tipEl.className,
+    background: getComputedStyle(b.panel).backgroundColor,
+    bodyFont: getComputedStyle(b.body.querySelector('.lp-md') || b.body).fontFamily,
   };
 })()`;
 
@@ -412,7 +420,47 @@ try {
         }
         await demoExt.evaluate('globalThis.__linkpeek.bubble.close()');
       }
+      // One picture per design, then all five side by side.
+      await mkdir(path.join(DOCS, 'themes'), { recursive: true });
+      const designs = [['light', 'Light'], ['dark', 'Dark'], ['vision', 'Color-blind safe'], ['paper', 'Paper'], ['midnight', 'Midnight']];
+      for (const [name] of designs) {
+        const dark = name === 'dark' || name === 'midnight';
+        await demo.emulateMedia({ colorScheme: dark ? 'dark' : 'light' });
+        await configure({ sync: { theme: name } });
+        await peek(demo, '#article');
+        await demoExt.settled();
+        const state = await waitFor(async () => {
+          const s = await demoExt.bubble();
+          return s?.reputation && s.icon && s.theme.endsWith(name) ? s : null;
+        }, { what: `${name} design ready` });
+        await rest();
+        await demo.screenshot({
+          path: path.join(DOCS, 'themes', `${name}.png`),
+          clip: { x: state.panel.x - 34, y: state.panel.y - 62, width: state.panel.width + 68, height: state.panel.height + 110 },
+        });
+        await demoExt.evaluate('globalThis.__linkpeek.bubble.close()');
+      }
+      await configure({ sync: { theme: 'auto' } });
+      await demo.emulateMedia({ colorScheme: 'light' });
       await demo.close();
+
+      // The pictures are embedded as data: a blank page may not load local files.
+      const figures = [];
+      for (const [name, label] of designs) {
+        const data = (await readFile(path.join(DOCS, 'themes', `${name}.png`))).toString('base64');
+        figures.push(`<figure style="margin:0;flex:1;text-align:center"><img src="data:image/png;base64,${data}" style="width:100%;border-radius:12px;display:block;margin-bottom:12px">${label}</figure>`);
+      }
+      const gallery = await context.newPage();
+      try {
+        await gallery.setViewportSize({ width: 2000, height: 760 });
+        await gallery.setContent(`<!doctype html><body style="margin:0;display:flex;align-items:flex-start;gap:18px;padding:22px;background:#eceae4;font:600 19px system-ui;color:#33343a">${figures.join('')}</body>`);
+        await gallery.waitForFunction(() => [...document.images].every((image) => image.complete && image.naturalWidth));
+        const height = await gallery.evaluate(() =>
+          Math.ceil(Math.max(...[...document.querySelectorAll('figure')].map((el) => el.getBoundingClientRect().bottom)) + 22));
+        await gallery.screenshot({ path: path.join(DOCS, 'themes.png'), clip: { x: 0, y: 0, width: 2000, height } });
+      } finally {
+        await gallery.close();
+      }
 
       if (STORE) {
         // Promo tiles, rendered from store/promo.html at the sizes the store asks for.
@@ -627,6 +675,45 @@ try {
     await configure({ sync: { format: 'placeholder' } });
   });
 
+  await step('five designs: the chosen one is applied, live, to the bubble and its hover card', async () => {
+    await peek(page, '#article');
+    await ext.settled();
+    const expected = {
+      light: { background: 'rgb(255, 255, 255)' },
+      dark: { background: 'rgb(31, 32, 36)' },
+      vision: { background: 'rgb(255, 255, 255)' },
+      paper: { background: 'rgb(251, 246, 234)', font: /Palatino|Georgia/ },
+      midnight: { background: 'rgba(0, 0, 0, 0)' }, // a translucent gradient, not a flat colour
+    };
+    for (const [name, look] of Object.entries(expected)) {
+      await configure({ sync: { theme: name } });
+      const state = await waitFor(async () => {
+        const s = await ext.bubble();
+        return s?.theme === `lp lp-t-${name}` ? s : null;
+      }, { what: `the ${name} design` });
+      assert.equal(state.tipTheme, `lp-tip lp-t-${name}`);
+      assert.equal(state.background, look.background, name);
+      if (look.font) assert.match(state.bodyFont, look.font, `${name} sets its own reading face`);
+    }
+    // Colour-blind safe: the level is also a number, not only a colour.
+    await configure({ sync: { theme: 'vision' } });
+    const vision = await waitFor(async () => {
+      const s = await ext.bubble();
+      return s?.theme.endsWith('vision') && s.reputation ? s : null;
+    }, { what: 'the reputation meter in the color-blind safe design' });
+    assert.equal(vision.reputation.score, '4/5');
+    await configure({ sync: { theme: 'light' } });
+    await waitFor(async () => (await ext.bubble())?.theme.endsWith('light'), { what: 'light' });
+    assert.equal((await ext.bubble()).reputation.score, '', 'the number is only shown where colour must not carry meaning alone');
+
+    // "Auto" follows the system setting, also while a bubble is open.
+    await configure({ sync: { theme: 'auto' } });
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await waitFor(async () => (await ext.bubble())?.theme === 'lp lp-t-dark', { what: 'auto → dark' });
+    await page.emulateMedia({ colorScheme: 'light' });
+    await waitFor(async () => (await ext.bubble())?.theme === 'lp lp-t-light', { what: 'auto → light' });
+  });
+
   await step('stopping mid-answer keeps what has arrived', async () => {
     server.state.chunkDelay = 80;
     await peek(page, '#article');
@@ -751,6 +838,18 @@ try {
     await options.waitForSelector('#saved-key.show');
     assert.equal(await options.textContent('#saved-key'), '✓ Saved');
     assert.equal((await stored()).models.anthropic, 'claude-sonnet-5-5');
+
+    // Design: six choices, saved on click.
+    assert.deepEqual(await options.$$eval('#themes .theme', (els) => els.map((el) => el.textContent)),
+      ['Auto', 'Light', 'Dark', 'Color-blind safe', 'Paper', 'Midnight']);
+    assert.equal(await options.getAttribute('#themes [data-theme="auto"]', 'aria-checked'), 'true');
+    await options.click('#themes [data-theme="paper"]');
+    await options.waitForSelector('#saved-design.show');
+    assert.equal(await options.getAttribute('#themes [data-theme="paper"]', 'aria-checked'), 'true');
+    assert.equal((await stored()).theme, 'paper');
+    assert.match(await options.textContent('#theme-hint'), /book typeface/);
+    await options.click('#themes [data-theme="auto"]');
+    await waitFor(async () => (await stored()).theme === 'auto', { what: 'design reset to be stored' });
 
     // Shortcut: "Change key", then press the key.
     assert.equal(await options.isDisabled('#reset-trigger'), true, 'already the default');

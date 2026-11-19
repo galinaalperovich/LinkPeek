@@ -11,6 +11,7 @@ import {
   DEFAULT_TRIGGER,
   FORMAT_PRESETS,
   PROVIDERS,
+  THEMES,
   loadSettings,
   resolveBaseUrl,
   resolveProvider,
@@ -27,7 +28,7 @@ const IS_MAC = /mac/i.test(navigator.userAgentData?.platform || navigator.platfo
 // Which card confirms a change to which setting.
 const CARD_OF = {
   apiKey: 'key', models: 'key', trigger: 'shortcut',
-  provider: 'advanced', baseUrl: 'advanced', reputation: 'advanced',
+  provider: 'advanced', baseUrl: 'advanced', reputation: 'advanced', theme: 'design',
 };
 const TRIGGER_HELP =
   'Any letter or digit works, and so does Alt/Option. You can also right-click a link and choose “Peek at this link”.';
@@ -210,6 +211,38 @@ function renderPresets() {
   );
 }
 
+// ── Design ───────────────────────────────────────────────────────────────
+
+function renderThemes() {
+  $('themes').replaceChildren(
+    ...THEMES.map((theme) => {
+      const [bg, fg, accent] = theme.swatch || ['linear-gradient(135deg, #ffffff 50%, #1f2024 50%)', '#8a8d94', '#f5a524'];
+      const tile = document.createElement('span');
+      tile.className = 'theme-tile';
+      tile.style.background = bg;
+      for (const tag of ['i', 'i', 'i', 'b']) {
+        const mark = document.createElement(tag);
+        mark.style.background = tag === 'b' ? accent : fg;
+        tile.append(mark);
+      }
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'theme';
+      button.dataset.theme = theme.id;
+      button.setAttribute('role', 'radio');
+      button.setAttribute('aria-checked', String(theme.id === settings.theme));
+      button.title = theme.hint;
+      button.append(tile, theme.label);
+      button.addEventListener('click', () => {
+        save({ theme: theme.id }, { now: true });
+        renderThemes();
+      });
+      return button;
+    }),
+  );
+  $('theme-hint').textContent = THEMES.find((theme) => theme.id === settings.theme)?.hint || '';
+}
+
 // ── Shortcut ─────────────────────────────────────────────────────────────
 
 function renderTrigger() {
@@ -282,6 +315,7 @@ async function init() {
   renderPresets();
   renderFormatState();
   renderTrigger();
+  renderThemes();
   renderCacheCount();
   scheduleKeyCheck(0);
 

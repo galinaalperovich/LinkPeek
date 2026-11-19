@@ -15,6 +15,7 @@ LinkPeek is a Chrome extension. It uses your own Claude (Anthropic) or OpenAI AP
 - **Answers questions.** Type in the bubble to ask anything about the linked page. The conversation keeps its context.
 - **Shows who is talking.** The bubble's header carries the site's own icon, the author (or the publishing organization) and the date, next to a five-bar reputation meter for the source.
 - **Remembers.** Peek at the same page again and the saved summary appears at once, with no new request, as long as the page has not changed.
+- **Five designs.** Light, Dark, Color-blind safe, Paper and Midnight, or Auto to follow your system.
 - **Your format.** One plain-language prompt in the settings controls length, bullets or prose, language and tone. Three presets to start from.
 - **Reads what a plain fetch cannot.** Pages that need JavaScript are opened in a muted background tab, read, and closed again. PDFs are sent to the model as documents.
 - **One key.** Paste a Claude or an OpenAI key; LinkPeek tells them apart on its own.
@@ -104,10 +105,13 @@ Click the LinkPeek toolbar icon.
 - **API key.** Checked against the provider as soon as you paste it.
 - **Model.** Defaults to Claude Opus 5.5 or GPT-6.2 Sol. Pick a smaller model for faster, cheaper peeks. The list also shows every model your key can use.
 - **Summary format.** The prompt that shapes every summary. For example: `Three bullets, then one sentence on why it matters. Always answer in English.` Edit it and press **Save**; the button lights up while there are unsaved changes and confirms with a green ✓. Choosing a preset applies it at once.
+- **Design.** Pick one of five looks for the bubble, or Auto. The color-blind safe design uses blue and orange in place of red and green, shows the reputation level as a number as well as a color, underlines every link and uses stronger borders.
 - **Shortcut.** Press **Change key**, then the letter or digit you want to hold instead of <kbd>X</kbd> (<kbd>Alt</kbd>/<kbd>Option</kbd> works too).
 - **Advanced.** The reputation meter on or off, how many summaries are saved (with a Clear button), and a custom API base URL for proxies and OpenAI-compatible servers such as OpenRouter or a local Ollama (`http://localhost:11434/v1`).
 
-The key, model, shortcut and advanced options are saved as soon as you change them; a green "✓ Saved" appears in the corner of the card each time.
+![The five designs: Light, Dark, Color-blind safe, Paper, Midnight](docs/themes.png)
+
+The key, model, design, shortcut and advanced options are saved as soon as you change them; a green "✓ Saved" appears in the corner of the card each time.
 
 ## How a page is read
 
