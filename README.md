@@ -19,19 +19,50 @@ LinkPeek is a Chrome extension. It uses your own Claude (Anthropic) or OpenAI AP
 - **Reads what a plain fetch cannot.** Pages that need JavaScript are opened in a muted background tab, read, and closed again. PDFs are sent to the model as documents.
 - **One key.** Paste a Claude or an OpenAI key; LinkPeek tells them apart on its own.
 
-## Install
+## Install in 2 minutes
 
-LinkPeek is not on the Chrome Web Store yet. Loading it from source takes a minute:
+No programming needed. Do these six steps in order.
 
-1. Download this repository (green **Code** button, then **Download ZIP**, and unzip it) or clone it.
-2. Open `chrome://extensions` in Chrome.
-3. Turn on **Developer mode** (top right).
-4. Click **Load unpacked** and choose the repository folder (the one containing `manifest.json`).
-5. The settings page opens. Paste your API key. Done.
+**1. Download LinkPeek.**
+Click this link: **[Download LinkPeek](https://github.com/galinaalperovich/LinkPeek/archive/refs/heads/main.zip)**.
+A file named `LinkPeek-main.zip` appears in your Downloads folder.
 
-No build step, no dependencies: the folder is the extension. It needs Chrome 116 or later. Other Chromium browsers (Edge, Brave) should work but are untested.
+**2. Unzip it.**
+Double-click that file. You now have a folder named `LinkPeek-main`.
+Keep this folder. If you delete it, LinkPeek stops working.
 
-You need an API key from [Anthropic](https://console.anthropic.com/settings/keys) or [OpenAI](https://platform.openai.com/api-keys). Usage is billed by them to your key; see [Cost](#cost).
+**3. Open the extensions page in Chrome.**
+Click the address bar at the top of Chrome, type `chrome://extensions` and press Enter.
+
+**4. Turn on "Developer mode".**
+It is a small switch in the top-right corner of that page. Click it once so it turns blue.
+
+**5. Click "Load unpacked".**
+The button is in the top-left corner. A file window opens. Pick the `LinkPeek-main` folder and click **Select**.
+
+**6. Paste your key.**
+A LinkPeek page opens by itself. Paste your key into the box at the top.
+When a green **✓ key works** appears under the box, you are done.
+
+**Now try it:** open any website, hold down the <kbd>X</kbd> key, and click a link.
+
+### I do not have a key
+
+A key is a long password that lets LinkPeek use an AI for you. You need one, from either company:
+
+- **Claude:** open [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys), sign up, click **Create Key**, copy it.
+- **OpenAI:** open [platform.openai.com/api-keys](https://platform.openai.com/api-keys), sign up, click **Create new secret key**, copy it.
+
+Both ask for a payment card. Each summary costs between a fraction of a cent and a few cents, depending on the model you pick; see [Cost](#cost).
+
+### It does not work
+
+- **Nothing happens when I click.** Keep <kbd>X</kbd> held down *while* you click the link. If it still does nothing, reload the page and try again.
+- **It works on some pages but not on others.** Chrome does not let any extension run on its own pages (the new-tab page, settings, the Chrome Web Store).
+- **The bubble shows an error about the key.** Click the puzzle-piece icon at the top right of Chrome, click **LinkPeek**, and paste the key again.
+- **I want to change the X key or the summary style.** Same place: puzzle-piece icon, then **LinkPeek**.
+
+LinkPeek needs Chrome 116 or later. Other Chromium browsers (Edge, Brave) should work but are untested.
 
 ## Use
 
