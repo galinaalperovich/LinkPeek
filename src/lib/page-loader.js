@@ -139,9 +139,22 @@ async function ensureOffscreen() {
   await creatingOffscreen;
 }
 
+// A page's inline event handlers (onclick, onerror, onload…) must never exist
+// in a document that an extension page parses: the extension's own security
+// policy forbids inline handlers, and Chrome reports each one it meets as an
+// error against the extension. Renaming the attributes before parsing keeps the
+// parsed document free of them. Only attribute names inside tags are touched;
+// text between tags is left exactly as it is.
+const HTML_TAG = /<[a-zA-Z][^<>"']*(?:(?:"[^"]*"|'[^']*')[^<>"']*)*>/g;
+const HANDLER_ATTRIBUTE = /([\s"'/])on([a-z]+\s*=)/gi;
+
+export function neutralizeHandlers(html) {
+  return html.replace(HTML_TAG, (tag) => tag.replace(HANDLER_ATTRIBUTE, '$1data-lp-on$2'));
+}
+
 async function parseHtml(html) {
   await ensureOffscreen();
-  const message = { target: 'offscreen', type: 'extract', html };
+  const message = { target: 'offscreen', type: 'extract', html: neutralizeHandlers(html) };
   let response;
   try {
     response = await chrome.runtime.sendMessage(message);
