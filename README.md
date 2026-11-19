@@ -3,11 +3,11 @@
 <h1>
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/hero-dark.png">
-    <img alt="LinkPeek. Peek at any link. Stay on the page." src="docs/hero-light.png">
+    <img alt="LinkPeek. Peek at any link. Keep your focus. Every new tab breaks your concentration. Hold X, click a link, read the gist in place." src="docs/hero-light.png">
   </picture>
 </h1>
 
-**A Chrome extension: hold <kbd>X</kbd> and click any link, and an AI summary of that page opens in a bubble right where you are.<br>Ask follow-up questions. Never lose your place.**
+**A Chrome extension for staying focused. Opening a link in a new tab costs you your train of thought.<br>Hold <kbd>X</kbd> and click it instead: an AI summary opens in a bubble right where you are, and answers your questions.**
 
 [![CI](https://img.shields.io/github/actions/workflow/status/galinaalperovich/LinkPeek/test.yml?branch=main&style=flat-square&label=CI)](https://github.com/galinaalperovich/LinkPeek/actions/workflows/test.yml)
 [![MIT license](https://img.shields.io/badge/license-MIT-555555?style=flat-square)](LICENSE)
