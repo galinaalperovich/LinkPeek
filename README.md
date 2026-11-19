@@ -183,10 +183,13 @@ npx playwright install chromium
 npm run test:e2e         # loads the extension into Chromium and drives it
 HEADED=1 npm run test:e2e   # watch it run
 SHOTS=1 npm run test:e2e    # also refresh docs/*.png
-npm run zip              # package for the Chrome Web Store
+npm run zip              # package for the Chrome Web Store: linkpeek-<version>.zip
+npm run store            # refresh the store screenshots and promo tiles in store/
 ```
 
 The end-to-end test starts a local server with fixture pages and stand-ins for the Claude and OpenAI APIs. It needs no API key and sends nothing off your machine.
+
+Publishing to the Chrome Web Store: the listing text, permission justifications and images are in [store/](store/listing.md).
 
 Issues and pull requests are welcome. Please run both test suites before sending a change.
 

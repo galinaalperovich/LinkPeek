@@ -1,5 +1,5 @@
 node_modules/
-linkpeek.zip
+linkpeek-*.zip
 test/e2e/.profile/
 test/e2e/output/
 .DS_Store

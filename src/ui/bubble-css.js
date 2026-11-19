@@ -118,9 +118,10 @@
   line-height: 1.35;
   white-space: nowrap;
 }
-.lp-host, .lp-facts { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.lp-host { flex: 0 1 auto; }
-.lp-facts { flex: 0 2 auto; }
+.lp-host, .lp-facts { overflow: hidden; text-overflow: ellipsis; }
+/* A long site name gives way first, so the meter and reading time stay readable. */
+.lp-host { flex: 0 100 auto; min-width: 48px; }
+.lp-facts { flex: 0 1 auto; min-width: 0; }
 
 /* Source reputation: five rising bars and one word. */
 .lp-rep {

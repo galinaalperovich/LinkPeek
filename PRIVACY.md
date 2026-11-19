@@ -1,5 +1,7 @@
 # Privacy
 
+_Last updated: November 19, 2026_
+
 LinkPeek has no server, no account, no analytics and no telemetry. It talks to exactly two kinds of hosts: the page you ask it to read, and the AI provider whose key you entered.
 
 ## What is stored, and where
@@ -44,3 +46,7 @@ See the table in the [README](README.md#privacy-and-security).
 ## Removing your data
 
 Uninstalling the extension deletes everything it stored. To remove only the key, clear the API key field in the settings. To remove saved summaries, press Clear under Advanced.
+
+## Contact
+
+Questions or concerns: open an issue at https://github.com/galinaalperovich/LinkPeek/issues.

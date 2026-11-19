@@ -5,6 +5,8 @@
 //   npm run test:e2e              headless
 //   HEADED=1 npm run test:e2e     watch it happen
 //   SHOTS=1 npm run test:e2e      also refresh the screenshots in docs/
+//   npm run store                 also refresh the Chrome Web Store images in store/
+//   EXT_DIR=path npm run test:e2e test another copy, e.g. the unzipped store package
 
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
@@ -17,7 +19,13 @@ import { SOURDOUGH_ANSWER, startServer } from './server.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const DOCS = path.join(ROOT, 'docs');
 const HEADED = Boolean(process.env.HEADED);
-const SHOTS = Boolean(process.env.SHOTS);
+const STORE = Boolean(process.env.STORE); // also write the Chrome Web Store images into store/
+const SHOTS = Boolean(process.env.SHOTS) || STORE;
+// EXT_DIR tests another copy of the extension, e.g. the unzipped store package.
+const EXT = process.env.EXT_DIR ? path.resolve(process.env.EXT_DIR) : ROOT;
+const STORE_DIR = path.join(ROOT, 'store');
+// Screenshots show a believable site name instead of 127.0.0.1.
+const DEMO_HOST = 'weekend.example';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -142,7 +150,10 @@ const context = await chromium.launchPersistentContext(profile, {
   channel: 'chromium', // the full browser: its headless mode can load extensions
   headless: !HEADED,
   viewport: { width: 1180, height: 820 },
-  args: [`--disable-extensions-except=${ROOT}`, `--load-extension=${ROOT}`, '--no-first-run'],
+  args: [
+    `--disable-extensions-except=${EXT}`, `--load-extension=${EXT}`, '--no-first-run',
+    `--host-resolver-rules=MAP ${DEMO_HOST} 127.0.0.1`,
+  ],
 });
 
 try {
@@ -322,37 +333,67 @@ try {
   });
 
   if (SHOTS) {
-    await step('screenshots for the README', async () => {
+    await step('screenshots for the README' + (STORE ? ' and the store listing' : ''), async () => {
       await mkdir(DOCS, { recursive: true });
-      await ext.evaluate('globalThis.__linkpeek.bubble.close()');
-      const clip = { x: 150, y: 0, width: 880, height: 800 };
+      if (STORE) await mkdir(path.join(STORE_DIR, 'screenshots'), { recursive: true });
+      const storeShot = (target, name) =>
+        STORE && target.screenshot({ path: path.join(STORE_DIR, 'screenshots', name), type: 'jpeg', quality: 93 });
+
+      // A separate, tidy page, so the bubble on the test page is left alone.
+      const demo = await context.newPage();
+      await demo.setViewportSize({ width: 1280, height: 800 }); // the store's screenshot size
+      await demo.goto(`http://${DEMO_HOST}:${new URL(server.origin).port}/demo.html`);
+      await demo.bringToFront();
+      const demoExt = await attach(demo, extensionId);
+      const rest = async () => {
+        await demo.mouse.move(60, 770);
+        await sleep(300);
+      };
+      const clip = { x: 200, y: 0, width: 880, height: 800 };
+
       for (const scheme of ['light', 'dark']) {
-        await page.emulateMedia({ colorScheme: scheme });
-        await peek(page, '#article');
-        const state = await ext.settled();
-        await page.mouse.click(state.input.x, state.input.y);
-        await page.keyboard.type('How long until it is ready?');
-        await page.keyboard.press('Enter');
-        await ext.settled(3);
-        await waitFor(async () => (await ext.bubble())?.reputation, { what: 'reputation meter' });
-        await page.mouse.move(40, 780);
-        await sleep(250);
-        await page.screenshot({ path: path.join(DOCS, `bubble-${scheme}.png`), clip });
+        await demo.emulateMedia({ colorScheme: scheme });
+        await peek(demo, '#article');
+        let state = await demoExt.settled();
+        await waitFor(async () => (await demoExt.bubble())?.reputation, { what: 'reputation meter' });
+        await rest();
+        if (scheme === 'light') await storeShot(demo, '1-summary.jpg');
+
+        await demo.mouse.click(state.input.x, state.input.y);
+        await demo.keyboard.type('How long until it is ready?');
+        await demo.keyboard.press('Enter');
+        await demoExt.settled(3);
+        await rest();
+        await demo.screenshot({ path: path.join(DOCS, `bubble-${scheme}.png`), clip });
+        await storeShot(demo, scheme === 'light' ? '2-ask.jpg' : '4-dark.jpg');
+
         if (scheme === 'light') {
-          const { reputation, panel } = await ext.bubble();
-          await page.mouse.move(reputation.at.x, reputation.at.y);
-          await sleep(250);
-          await page.screenshot({
+          state = await demoExt.bubble();
+          await demo.mouse.move(state.reputation.at.x, state.reputation.at.y);
+          await sleep(300);
+          await demo.screenshot({
             path: path.join(DOCS, 'reputation.png'),
-            clip: { x: panel.x - 12, y: panel.y - 12, width: panel.width + 24, height: 272 },
+            clip: { x: state.panel.x - 12, y: state.panel.y - 12, width: state.panel.width + 24, height: 272 },
           });
-          await page.mouse.move(40, 780);
+          await storeShot(demo, '3-reputation.jpg');
+          await rest();
         }
-        await ext.evaluate('globalThis.__linkpeek.bubble.close()');
+        await demoExt.evaluate('globalThis.__linkpeek.bubble.close()');
       }
-      await page.emulateMedia({ colorScheme: 'light' });
-      await peek(page, '#article');
-      await ext.settled();
+      await demo.close();
+
+      if (STORE) {
+        // Promo tiles, rendered from store/promo.html at the sizes the store asks for.
+        const promo = await context.newPage();
+        for (const [name, width, height] of [['promo-small.jpg', 440, 280], ['promo-marquee.jpg', 1400, 560]]) {
+          await promo.setViewportSize({ width, height });
+          await promo.goto(pathToFileURL(path.join(STORE_DIR, 'promo.html')).href);
+          await sleep(250);
+          await promo.screenshot({ path: path.join(STORE_DIR, name), type: 'jpeg', quality: 95 });
+        }
+        await promo.close();
+      }
+      await page.bringToFront();
     });
   }
 
@@ -452,6 +493,7 @@ try {
   });
 
   await step('"Peek at this link" (context menu) opens the bubble as well', async () => {
+    const ratingsBefore = server.reputationRequests.length;
     await worker.evaluate(async ({ origin, url }) => {
       const [tab] = await chrome.tabs.query({ url: `${origin}/*` });
       await chrome.tabs.sendMessage(tab.id, { type: 'linkpeek:open', url }, { frameId: 0 });
@@ -460,7 +502,7 @@ try {
     assert.match(state.text, /TL;DR: A sourdough starter/);
     // Same source as before: the meter comes back without asking the model again.
     await waitFor(async () => (await ext.bubble())?.reputation?.label === 'High', { what: 'cached reputation' });
-    assert.equal(server.reputationRequests.length, 1, 'one rating request per source');
+    assert.equal(server.reputationRequests.length, ratingsBefore, 'one rating request per source');
   });
 
   await step('the reputation meter can be switched off', async () => {
@@ -706,6 +748,12 @@ try {
       });
       await sleep(2600); // let the "Saved" notes fade
       await options.screenshot({ path: path.join(DOCS, 'settings.png'), fullPage: true });
+      if (STORE) {
+        await options.setViewportSize({ width: 1280, height: 800 });
+        await options.evaluate(() => window.scrollTo(0, 0));
+        await sleep(200);
+        await options.screenshot({ path: path.join(STORE_DIR, 'screenshots', '5-settings.jpg'), type: 'jpeg', quality: 93 });
+      }
       await options.click('#presets .chip:has-text("Key points")');
       await options.waitForSelector('#format-state.ok');
     }
