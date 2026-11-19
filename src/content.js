@@ -130,6 +130,17 @@
     return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
   }
 
+  // The "TL;DR:" that opens a summary is set in italic, whether the model
+  // wrote it bold, plain, or as part of a longer bold sentence.
+  function italicTldr(target) {
+    const first = target.firstElementChild;
+    const node = first && document.createTreeWalker(first, NodeFilter.SHOW_TEXT).nextNode();
+    const match = node && /^\s*TL;?DR:?/i.exec(node.nodeValue);
+    if (!match) return;
+    node.parentNode.insertBefore(h('em', { class: 'lp-tldr', text: match[0].trim() }), node);
+    node.nodeValue = node.nodeValue.slice(match[0].length);
+  }
+
   // ── Marking the link ─────────────────────────────────────────────────
 
   // While a bubble is open, the link it belongs to is marked on the page, the
@@ -208,7 +219,7 @@
       const host = hostOf(this.url);
       this.titleEl = h('a', {
         class: 'lp-title', href: this.url, target: '_blank', rel: 'noopener noreferrer',
-        title: this.url, text: this.linkText || prettyUrl(this.url), draggable: 'false',
+        text: this.linkText || prettyUrl(this.url), draggable: 'false',
       });
       // The site's first letter until (and unless) its real icon arrives.
       this.avatarEl = h('div', { class: 'lp-avatar', text: (host[0] || '?'), 'aria-hidden': 'true' });
@@ -243,18 +254,41 @@
       this.sendBtn = h('button', { class: 'lp-send', type: 'submit', title: 'Ask', 'aria-label': 'Ask', disabled: true }, icon('send'));
       this.form = h('form', { class: 'lp-ask' }, this.input, this.sendBtn);
 
-      this.panel = h('div', { class: 'lp', role: 'dialog', 'aria-label': 'LinkPeek summary' }, this.head, this.body, this.form);
+      // A small way into the settings from every bubble.
+      this.settingsBtn = h('button', { class: 'lp-settings', type: 'button', text: 'Settings' });
+      this.settingsBtn.addEventListener('click', () => {
+        try {
+          chrome.runtime.sendMessage({ type: 'linkpeek:open-options' }).catch(() => {});
+        } catch {
+          // extension was reloaded
+        }
+      });
+      this.foot = h('div', { class: 'lp-foot' }, this.settingsBtn);
+
+      this.panel = h('div', { class: 'lp', role: 'dialog', 'aria-label': 'LinkPeek summary' }, this.head, this.body, this.form, this.foot);
       this.root.append(this.panel, this.tipEl);
       this.applyTheme();
 
       closeBtn.addEventListener('click', () => this.close());
-      this.repEl.addEventListener('mouseenter', () => this.showTip());
-      this.repEl.addEventListener('mouseleave', () => this.hideTip());
-      this.repEl.addEventListener('focus', () => this.showTip());
-      this.repEl.addEventListener('blur', () => this.hideTip());
+      // Two things in the header explain themselves in a hover card: the
+      // reputation meter, and the title, which is often too long for one line.
+      const card = (el, content) => {
+        el.addEventListener('mouseenter', () => this.showTip(el, content()));
+        el.addEventListener('mouseleave', () => this.hideTip());
+        el.addEventListener('focus', () => this.showTip(el, content()));
+        el.addEventListener('blur', () => this.hideTip());
+      };
+      card(this.repEl, () => this.repCard);
+      card(this.titleEl, () => [
+        h('div', { class: 'lp-tip-title' }, h('strong', { text: this.titleEl.textContent })),
+        h('div', { class: 'lp-tip-foot lp-tip-url', text: this.page?.url || this.url }),
+      ]);
       this.copyBtn.addEventListener('click', () => this.copy());
       this.head.addEventListener('pointerdown', (event) => this.startDrag(event));
       this.input.addEventListener('input', () => this.syncInput());
+      for (const type of ['wheel', 'touchmove']) {
+        this.body.addEventListener(type, () => { this.followEl = null; }, { passive: true });
+      }
       this.form.addEventListener('submit', (event) => {
         event.preventDefault();
         if (this.busy) this.cancel?.();
@@ -406,7 +440,6 @@
       this.page = page;
       if (page.title) this.titleEl.textContent = page.title;
       for (const el of [this.titleEl, this.openEl]) el.setAttribute('href', page.url);
-      this.titleEl.title = page.url;
       const facts = [];
       if (page.kind === 'pdf') facts.push(['PDF', formatBytes(page.sizeBytes)].filter(Boolean).join(' '));
       else if (page.readMinutes) facts.push(`${page.readMinutes} min read`);
@@ -536,14 +569,14 @@
       );
       const score = rating.level ? `${rating.level} of 5` : '';
       const why = rating.reason ? `Why: ${rating.reason}.` : '';
-      this.tipEl.replaceChildren(
+      this.repCard = [
         h('div', { class: 'lp-tip-title' },
           h('strong', { text: `Source reputation: ${label}` }),
           score ? h('span', { text: score }) : null),
         h('div', { text: means }),
         why ? h('div', { text: why }) : null,
         h('div', { class: 'lp-tip-foot', text: REPUTATION_CAVEAT }),
-      );
+      ];
       // The same words for screen readers, which do not get the hover card.
       this.repEl.setAttribute('aria-label',
         [`Source reputation: ${label}${score ? `, ${score}` : ''}.`, means, why, REPUTATION_CAVEAT].filter(Boolean).join(' '));
@@ -551,10 +584,11 @@
 
     // The card is a sibling of the panel, so the panel's rounded clipping
     // cannot cut it off. It sits under the meter, or above when there is no room.
-    showTip() {
-      if (this.repEl.hidden || this.closed) return;
+    showTip(anchor, content) {
+      if (this.closed || !content || anchor.hidden) return;
       const tip = this.tipEl;
-      const chip = this.repEl.getBoundingClientRect();
+      tip.replaceChildren(...content.filter(Boolean));
+      const chip = anchor.getBoundingClientRect();
       const viewW = document.documentElement.clientWidth || window.innerWidth;
       const width = Math.min(290, viewW - 16);
       tip.hidden = false;
@@ -578,6 +612,10 @@
           streaming,
           baseUrl: this.page?.url || this.url,
         }));
+        italicTldr(target);
+        // While an answer grows, keep its question at the top of the view,
+        // unless the reader has scrolled somewhere else.
+        if (this.followEl?.isConnected) this.body.scrollTop = this.followEl.offsetTop - 8;
       };
       cancelAnimationFrame(this.frame);
       if (streaming) this.frame = requestAnimationFrame(paint);
@@ -702,6 +740,7 @@
       const bubbleEl = h('div', { class: 'lp-q', text: question });
       this.body.append(bubbleEl);
       this.setStatus('Thinking…');
+      this.followEl = bubbleEl;
       this.body.scrollTop = bubbleEl.offsetTop - 8;
       this.run({ type: 'ask', page: this.page, linkText: this.linkText, history: this.history, question }, {
         onDone: (text) => this.history.push({ role: 'user', text: question }, { role: 'assistant', text }),
@@ -906,6 +945,12 @@
     if (bubble?.owns(event)) bubble.handleKey(event);
   }
 
+  // A press anywhere outside the bubble dismisses it, like any popover. (A
+  // shortcut-click on another link then opens a new bubble for that link.)
+  function onPointerDown(event) {
+    if (bubble && event.isTrusted && event.button === 0 && !bubble.owns(event)) bubble.close();
+  }
+
   function onContextMenu(event) {
     const anchor = findAnchor(event);
     lastContext = {
@@ -972,6 +1017,7 @@
   listen(window, 'keydown', onKeyDown, true);
   listen(window, 'keyup', onKeyUp, true);
   listen(window, 'keypress', onKeyPress, true);
+  listen(window, 'pointerdown', onPointerDown, true);
   listen(window, 'contextmenu', onContextMenu, true);
   // A key released while another window had focus never sends keyup.
   listen(window, 'blur', (event) => event.target === window && held.clear(), true);

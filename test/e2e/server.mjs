@@ -137,7 +137,9 @@ export async function startServer() {
   const requests = [];
   /** Source reputation requests, kept apart from the summaries and answers. */
   const reputationRequests = [];
-  const state = { chunkDelay: 6, changes: 0, iconRequests: 0, faviconRequests: 0, faviconByHost: {} };
+  // `script` lets a caller (the demo recorder) decide what the "model" says:
+  // { summary, answer, rating }. Tests leave it unset.
+  const state = { chunkDelay: 6, changes: 0, iconRequests: 0, faviconRequests: 0, faviconByHost: {}, script: null };
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
@@ -167,9 +169,10 @@ export async function startServer() {
         const first = body.messages[0].content;
         const last = body.messages.at(-1).content;
         const pageText = first.map((block) => block.text || '').join('\n');
-        const text = rating
+        const scripted = state.script && (rating ? state.script.rating : body.messages.length > 1 ? state.script.answer : state.script.summary);
+        const text = scripted || (rating
           ? ratingReply(pageText)
-          : reply({ pageText, lastUserText: last.at(-1).text || '', turns: body.messages.length });
+          : reply({ pageText, lastUserText: last.at(-1).text || '', turns: body.messages.length }));
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
         const emit = (event) => res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
         emit({ type: 'message_start', message: { id: 'msg_test', model: body.model, role: 'assistant', content: [] } });

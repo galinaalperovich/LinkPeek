@@ -92,6 +92,9 @@ const BUBBLE_STATE = `(() => {
     panel: { x: panel.x, y: panel.y, width: panel.width, height: panel.height },
     topLayer: b.host.matches(':popover-open'),
     theme: b.panel.className,
+    fontSize: getComputedStyle(b.panel).fontSize,
+    titleAt: center(b.titleEl),
+    tip: b.tipEl.hidden ? '' : b.tipEl.innerText,
     tipTheme: b.tipEl.className,
     background: getComputedStyle(b.panel).backgroundColor,
     bodyFont: getComputedStyle(b.body.querySelector('.lp-md') || b.body).fontFamily,
@@ -219,7 +222,8 @@ try {
     assert.match(summary.sub, /^127\.0\.0\.1 · \d+ min read$/);
     assert.equal(summary.credit, 'Author: Mara Lindqvist, October 3, 2026', 'author and date in the header');
     assert.match(summary.text, /TL;DR: A sourdough starter is a stable culture/);
-    assert.match(summary.html, /<strong>TL;DR:<\/strong>/);
+    assert.match(summary.html, /<strong><em class="lp-tldr">TL;DR:<\/em><\/strong>/, 'bold, and the label in italic');
+    assert.equal(summary.fontSize, '12.5px');
     assert.equal((summary.html.match(/<li>/g) || []).length, 5, 'five bullet points');
     assert.ok(!summary.text.includes('**'), 'no raw Markdown left');
     assert.equal(summary.inputDisabled, false);
@@ -235,6 +239,16 @@ try {
     assert.deepEqual(icon, [...ICON_COLOR, 255], 'the pixels of the icon the page declares (a relative link, resolved)');
     assert.equal(server.state.iconRequests, 1);
     assert.equal(server.state.faviconRequests, 0, 'the declared icon was found, so /favicon.ico is not tried');
+  });
+
+  await step('hovering the title shows it in full, with the address', async () => {
+    await page.mouse.move(summary.titleAt.x, summary.titleAt.y);
+    const card = (await ext.bubble()).tip;
+    assert.ok(card.includes('How a sourdough starter actually works'), card);
+    assert.ok(card.includes(`${server.origin}/article.html`), 'and where it leads');
+    assert.equal(await ext.evaluate('globalThis.__linkpeek.bubble.titleEl.getAttribute("title")'), null, 'no second, browser-made tooltip');
+    await page.mouse.move(40, 780);
+    assert.equal((await ext.bubble()).tip, '');
   });
 
   await step('the clicked link is marked while its bubble is open', async () => {
@@ -477,8 +491,25 @@ try {
     });
   }
 
+  await step('a click anywhere else on the page closes the bubble', async () => {
+    const before = await ext.bubble();
+    await page.mouse.click(before.panel.x + 20, before.panel.y + before.panel.height - 70); // inside: stays
+    assert.ok(await ext.bubble(), 'a click inside the bubble keeps it open');
+    await page.mouse.move(60, 760);
+    await page.mouse.down({ button: 'right' });
+    await page.mouse.up({ button: 'right' });
+    assert.ok(await ext.bubble(), 'so does a right-click elsewhere');
+    await page.keyboard.press('Escape'); // dismisses any context menu; closes the bubble
+    await peek(page, '#article');
+    await ext.settled();
+    await page.mouse.click(60, 760); // empty page area
+    assert.equal(await ext.bubble(), null);
+    assert.equal(await page.getAttribute('#article', 'style'), null, 'and the link is unmarked');
+    await peek(page, '#article');
+    await ext.settled();
+  });
+
   await step('Escape closes the bubble and removes it from the page', async () => {
-    await page.mouse.click(30, 30); // focus back on the page
     await page.keyboard.press('Escape');
     assert.equal(await ext.bubble(), null);
     assert.equal(await page.evaluate(() => document.querySelector('linkpeek-bubble')), null);

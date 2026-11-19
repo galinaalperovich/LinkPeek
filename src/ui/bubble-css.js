@@ -40,7 +40,7 @@
   --tip-shadow: 0 10px 30px -8px rgba(15, 18, 28, 0.5), 0 2px 8px rgba(15, 18, 28, 0.2);
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-read: var(--font);
-  --size: 13.5px;
+  --size: 12.5px;
   color-scheme: light;
 }
 
@@ -93,7 +93,7 @@
   --bad: #d55e00;
   --send-bg: #0072b2;
   --border: 1.5px solid rgba(16, 18, 22, 0.55);
-  --size: 14px;
+  --size: 13px;
 }
 
 /* Paper: a warm page set in a book face, for long reading. */
@@ -125,7 +125,7 @@
   --tip-fg: #fbf6ea;
   --tip-muted: #c9b9a2;
   --font-read: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
-  --size: 14.5px;
+  --size: 13.5px;
 }
 
 /* Midnight: frosted navy glass with a violet-to-cyan edge. */
@@ -262,7 +262,7 @@
   gap: 6px;
   min-width: 0;
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: 11px;
   line-height: 1.35;
   white-space: nowrap;
 }
@@ -285,7 +285,7 @@
   background: var(--soft);
   color: var(--fg);
   font: inherit;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
   line-height: 1.4;
   cursor: help;
@@ -324,7 +324,7 @@
   background: var(--tip-bg);
   color: var(--tip-fg);
   box-shadow: var(--tip-shadow);
-  font: 400 12px/1.45 var(--font);
+  font: 400 11.5px/1.45 var(--font);
   letter-spacing: normal;
   text-align: left;
   white-space: normal;
@@ -334,8 +334,9 @@
 .lp-tip[hidden] { display: none; }
 .lp-tip-title { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .lp-tip-title strong { font-weight: 650; }
-.lp-tip-title span { flex: none; color: var(--tip-muted); font-size: 11px; }
-.lp-tip-foot { margin-top: 3px; padding-top: 6px; border-top: 1px solid var(--tip-line); color: var(--tip-muted); font-size: 11px; }
+.lp-tip-title span { flex: none; color: var(--tip-muted); font-size: 10.5px; }
+.lp-tip-url { overflow-wrap: anywhere; }
+.lp-tip-foot { margin-top: 3px; padding-top: 6px; border-top: 1px solid var(--tip-line); color: var(--tip-muted); font-size: 10.5px; }
 @keyframes lp-fade {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -343,7 +344,7 @@
 
 .lp-credit {
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: 11px;
   line-height: 1.35;
   white-space: nowrap;
   overflow: hidden;
@@ -401,6 +402,7 @@
 .lp-md ol > li::marker { color: var(--muted); font-weight: 600; }
 .lp-md li > ul, .lp-md li > ol { margin: 3px 0 0; }
 .lp-md strong { color: var(--strong); font-weight: 680; }
+.lp-tldr { font-style: italic; }
 .lp-md h3, .lp-md h4, .lp-md h5 { margin: 12px 0 4px; color: var(--strong); font-size: 1em; font-weight: 700; line-height: 1.35; }
 .lp-md h5 { color: var(--muted); }
 .lp-md a { color: var(--link); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
@@ -408,7 +410,7 @@
   padding: 1px 4px;
   border-radius: 4px;
   background: var(--soft);
-  font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font: 0.9em/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 .lp-md pre { margin: 0 0 8px; padding: 8px 10px; border-radius: 8px; background: var(--soft); overflow-x: auto; }
 .lp-md pre code { padding: 0; background: none; white-space: pre; }
@@ -425,11 +427,11 @@
   white-space: pre-wrap;
 }
 
-.lp-note { margin: 0 0 8px; color: var(--muted); font-size: 12px; }
+.lp-note { margin: 0 0 8px; color: var(--muted); font-size: 11.5px; }
 
 /* Design-specific touches. */
 .lp-t-paper .lp-head { border-bottom: 3px double var(--line); }
-.lp-t-paper .lp-title { font-family: var(--font-read); font-size: 15.5px; font-weight: 700; }
+.lp-t-paper .lp-title { font-family: var(--font-read); font-size: 14.5px; font-weight: 700; }
 .lp-t-paper .lp-q { font-family: var(--font-read); font-style: italic; border-radius: 6px; }
 .lp-t-paper .lp-md li::marker { font-weight: 400; }
 .lp-t-vision .lp-md a, .lp-t-vision .lp-linkbtn { text-decoration-thickness: 2px; }
@@ -453,7 +455,7 @@
 }
 .lp-linkbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-.lp-status { display: flex; align-items: center; gap: 8px; margin: 2px 0 10px; color: var(--muted); font-size: 12.5px; }
+.lp-status { display: flex; align-items: center; gap: 8px; margin: 2px 0 10px; color: var(--muted); font-size: 12px; }
 .lp-status[hidden], .lp-skeleton[hidden] { display: none; }
 .lp-dots { display: inline-flex; gap: 3px; }
 .lp-dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); animation: lp-dot 1.1s infinite ease-in-out; }
@@ -503,6 +505,22 @@
 .lp-btn.lp-primary:hover { filter: brightness(1.05); background: var(--accent); }
 
 /* ── Ask ────────────────────────────────────────────────── */
+
+.lp-foot { display: flex; justify-content: flex-end; padding: 0 12px 6px; margin-top: -4px; }
+.lp-settings {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 10px;
+  line-height: 1.2;
+  opacity: 0.75;
+  cursor: pointer;
+}
+.lp-settings:hover { opacity: 1; text-decoration: underline; }
+.lp-settings:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .lp-ask {
   display: flex;
