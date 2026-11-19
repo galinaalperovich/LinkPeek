@@ -22,6 +22,20 @@ Worth knowing: the quiet spell around day four is normal. Most people throw thei
 export const SOURDOUGH_ANSWER =
   'About **7 to 10 days** at room temperature (around 24 °C). It is ready when it doubles within 4–6 hours of a feed.';
 
+// Replies for the tech article that the screenshots are taken with.
+export const PASSKEYS_SUMMARY = `**TL;DR:** A passkey replaces your password with a key pair. The private key never leaves your device, so there is nothing for a fake site or a breached server to steal.
+
+- **Signing in:** the site sends a random challenge, your device signs it with the private key, and the site checks the signature with the public key it stored.
+- **Why phishing fails:** a passkey is tied to the real site's exact domain, so a look-alike address gets nothing.
+- **What you do:** unlock with a fingerprint, your face or a PIN. That check stays on the device.
+- **More than one device:** Apple, Google and password managers sync passkeys with end-to-end encryption.
+- **Breaches matter less:** servers hold only public keys, which are useless to an attacker.
+
+Worth knowing: moving passkeys between ecosystems is still clumsy, so keep a second way to sign in on important accounts.`;
+
+export const PASSKEYS_ANSWER =
+  'If your passkeys are synced, **nothing is lost**: sign in to your Apple, Google or password-manager account on a new device and they come back. A passkey that lived only on that phone is gone, so use the account\'s recovery method or your second sign-in option.';
+
 // "Привет, мир" and a paragraph, encoded as windows-1251.
 function legacyPage() {
   const text =
@@ -47,15 +61,18 @@ function titleOf(text) {
 /** Decides what the "model" says, from the provider-neutral view of a request. */
 function reply({ pageText, lastUserText, turns }) {
   if (turns > 1) {
+    if (/passkey/i.test(pageText)) return PASSKEYS_ANSWER;
     return /sourdough/i.test(pageText) ? SOURDOUGH_ANSWER : `Mock answer to: ${lastUserText}`;
   }
+  if (/passkey/i.test(pageText)) return PASSKEYS_SUMMARY;
   if (/sourdough/i.test(pageText)) return SOURDOUGH_SUMMARY;
   return `**TL;DR:** Mock summary of "${titleOf(pageText)}".\n\n- First point\n- Second point`;
 }
 
-// A rating request is recognised by its system prompt. The "model" knows one source.
+// A rating request is recognised by its system prompt. The "model" knows two sources.
 const isRatingRequest = (system) => /rate how far a reader can generally trust/.test(String(system));
 function ratingReply(source) {
+  if (/Byte Review/.test(source)) return '{"level": 4, "reason": "Established technology publication with named authors"}';
   return /Weekend Reader/.test(source)
     ? '{"level": 4, "reason": "Established food magazine with named authors"}'
     : '{"level": 0, "reason": "Not a source I recognise"}';

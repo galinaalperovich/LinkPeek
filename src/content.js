@@ -127,12 +127,50 @@
     return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
   }
 
+  // ── Marking the link ─────────────────────────────────────────────────
+
+  // While a bubble is open, the link it belongs to is marked on the page, the
+  // way a highlighter pen would, so it is obvious what the bubble is about.
+  // None of these properties changes the page's layout.
+  const LINK_MARK = {
+    'background-color': 'rgba(245, 165, 36, 0.3)',
+    outline: '2px solid #f5a524',
+    'outline-offset': '2px',
+    'border-radius': '3px',
+  };
+
+  /** Marks the link and returns a function that puts its styles back exactly. */
+  function markLink(anchor) {
+    try {
+      const style = anchor.style;
+      const hadAttribute = anchor.hasAttribute('style');
+      const before = Object.keys(LINK_MARK).map((name) => [
+        name, style.getPropertyValue(name), style.getPropertyPriority(name),
+      ]);
+      for (const [name, value] of Object.entries(LINK_MARK)) style.setProperty(name, value, 'important');
+      return () => {
+        try {
+          for (const [name, value, priority] of before) {
+            if (value) style.setProperty(name, value, priority);
+            else style.removeProperty(name);
+          }
+          if (!hadAttribute && !anchor.getAttribute('style')) anchor.removeAttribute('style');
+        } catch {
+          // the element is gone; nothing to restore
+        }
+      };
+    } catch {
+      return () => {};
+    }
+  }
+
   // ── The bubble ───────────────────────────────────────────────────────
 
   class Bubble {
-    constructor({ url, linkText, point, rect }) {
+    constructor({ url, linkText, point, rect, anchor }) {
       this.url = url;
       this.linkText = linkText || '';
+      this.unmarkLink = anchor ? markLink(anchor) : () => {};
       this.page = null; // what the service worker read, once known
       this.history = []; // completed turns after the page: summary, Q, A, …
       this.summary = '';
@@ -689,6 +727,7 @@
       this.closed = true;
       cancelAnimationFrame(this.frame);
       this.closeReputationPort();
+      this.unmarkLink();
       try {
         this.cancel?.();
       } catch {
@@ -761,6 +800,7 @@
       linkText: linkLabel(anchor),
       point: { x: event.clientX, y: event.clientY },
       rect: anchor.getBoundingClientRect(),
+      anchor,
     });
   }
 
@@ -800,9 +840,11 @@
   }
 
   function onContextMenu(event) {
+    const anchor = findAnchor(event);
     lastContext = {
       point: { x: event.clientX, y: event.clientY },
-      label: linkLabel(findAnchor(event)),
+      label: linkLabel(anchor),
+      anchor,
       time: Date.now(),
     };
   }
@@ -811,7 +853,15 @@
   function onMessage(message) {
     if (message?.type !== 'linkpeek:open' || typeof message.url !== 'string') return;
     const recent = lastContext && Date.now() - lastContext.time < 60_000 ? lastContext : null;
-    openBubble({ url: message.url, linkText: recent?.label || '', point: recent?.point });
+    // Only mark the link that was right-clicked if it is the one being opened.
+    const anchor = recent?.anchor && linkUrl(recent.anchor) === message.url ? recent.anchor : null;
+    openBubble({
+      url: message.url,
+      linkText: recent?.label || '',
+      point: recent?.point,
+      rect: anchor?.getBoundingClientRect(),
+      anchor,
+    });
   }
 
   function onStorageChanged(changes, area) {

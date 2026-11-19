@@ -33,7 +33,7 @@ Hold X and click any link for an AI summary in a bubble, then ask follow-up ques
 Hold X and click any link. A small bubble opens next to it with a summary of the page behind the link, and a box to ask follow-up questions. You never leave the page you are reading.
 
 WHAT IT DOES
-• Summarizes the linked page in place. The page is read in the background and the summary streams into a bubble beside the link.
+• Summarizes the linked page in place. The page is read in the background and the summary streams into a bubble beside the link. The link is highlighted while its bubble is open, so it is always clear what the bubble is about.
 • Answers your questions about that page, keeping the conversation in context.
 • Shows who is talking: the author or publishing organization, the date, and a five-bar reputation meter for the source. Hover over the meter to see what the rating means and why. The rating is an estimate made by the AI, not a verified score.
 • Remembers. Peek at the same page again and the saved summary appears at once, as long as the page has not changed.

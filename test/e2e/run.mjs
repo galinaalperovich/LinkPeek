@@ -25,7 +25,7 @@ const SHOTS = Boolean(process.env.SHOTS) || STORE;
 const EXT = process.env.EXT_DIR ? path.resolve(process.env.EXT_DIR) : ROOT;
 const STORE_DIR = path.join(ROOT, 'store');
 // Screenshots show a believable site name instead of 127.0.0.1.
-const DEMO_HOST = 'weekend.example';
+const DEMO_HOST = 'bytereview.example';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -213,6 +213,22 @@ try {
     assert.equal(context.pages().length, tabs, 'a readable page needs no extra tab');
   });
 
+  await step('the clicked link is marked while its bubble is open', async () => {
+    const look = (selector) => page.$eval(selector, (el) => ({
+      outline: el.style.outline,
+      background: el.style.backgroundColor,
+      priority: el.style.getPropertyPriority('outline'),
+      attribute: el.getAttribute('style'),
+    }));
+    const marked = await look('#article');
+    assert.match(marked.outline, /rgb\(245, 165, 36\)/, 'an amber ring around the link');
+    assert.match(marked.background, /rgba\(245, 165, 36/, 'and a highlighter tint');
+    assert.equal(marked.priority, 'important', 'the page\'s own styles cannot hide it');
+    assert.equal((await look('#spa')).attribute, null, 'other links are untouched');
+    const box = await page.locator('#article').boundingBox();
+    assert.ok(Math.abs(box.y - (await page.locator('#article').evaluate((el) => el.getBoundingClientRect().y))) < 1, 'no layout shift');
+  });
+
   await step('the bubble sits next to the link, inside the viewport', async () => {
     const link = await page.locator('#article').boundingBox();
     const { panel } = summary;
@@ -360,7 +376,7 @@ try {
         if (scheme === 'light') await storeShot(demo, '1-summary.jpg');
 
         await demo.mouse.click(state.input.x, state.input.y);
-        await demo.keyboard.type('How long until it is ready?');
+        await demo.keyboard.type('What if I lose my phone?');
         await demo.keyboard.press('Enter');
         await demoExt.settled(3);
         await rest();
@@ -402,6 +418,7 @@ try {
     await page.keyboard.press('Escape');
     assert.equal(await ext.bubble(), null);
     assert.equal(await page.evaluate(() => document.querySelector('linkpeek-bubble')), null);
+    assert.equal(await page.getAttribute('#article', 'style'), null, 'the link\'s mark is removed with the bubble');
   });
 
   await step('a normal click, a same-page anchor and a held key in a text box behave as usual', async () => {
@@ -480,6 +497,23 @@ try {
     const state = await ext.settled();
     assert.equal(state.error, '');
     assert.ok(server.requests.at(-1).body.messages[0].content[0].text.includes('PLAIN_TEXT_NOTES'));
+  });
+
+  await step('a link with its own inline styles gets exactly those back', async () => {
+    // Start with no bubble open, so no link is marked while its styles are set up.
+    await page.keyboard.press('Escape');
+    await waitFor(async () => (await ext.bubble()) === null, { what: 'bubble to close' });
+    const original = 'color: teal; outline: red dotted 1px; background-color: yellow !important;';
+    await page.$eval('#notes', (el, style) => el.setAttribute('style', style), original);
+    const before = await page.getAttribute('#notes', 'style');
+    await peek(page, '#notes');
+    await ext.settled();
+    assert.match(await page.$eval('#notes', (el) => el.style.outline), /rgb\(245, 165, 36\)/);
+    await peek(page, '#legacy'); // opening another bubble moves the mark
+    await ext.settled();
+    assert.equal(await page.getAttribute('#notes', 'style'), before, 'restored exactly');
+    assert.match(await page.$eval('#legacy', (el) => el.style.outline), /rgb\(245, 165, 36\)/);
+    await page.$eval('#notes', (el) => el.removeAttribute('style'));
   });
 
   await step('a dead link says so and never calls the model', async () => {
