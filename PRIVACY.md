@@ -8,7 +8,8 @@ LinkPeek has no server, no account, no analytics and no telemetry. It talks to e
 | --- | --- | --- |
 | API key, optional API base URL | The extension's own IndexedDB database on this device | Only as the credential on requests to your AI provider |
 | Summary format, model choice, shortcut key | `chrome.storage.sync` | Synced by Chrome to your own signed-in browsers, if you use Chrome sync |
-| Pages you peek at, summaries, questions | Memory only, while the bubble is open | Sent to your AI provider (see below); never written to disk by LinkPeek |
+| Finished summaries | The extension's own IndexedDB database on this device, for up to 30 days (at most 300). Each is stored under a hash of the page content, not under its address or text. Nothing is saved from incognito windows. | No. Clear them any time under Settings, Advanced |
+| Pages you peek at, your questions, the answers | Memory only, while the bubble is open | Sent to your AI provider (see below); never written to disk by LinkPeek |
 
 The API key is deliberately kept out of `chrome.storage`. Scripts that an extension runs inside web pages can read `chrome.storage`; they cannot open the extension's IndexedDB database. The key is used only by the extension's service worker.
 
@@ -42,4 +43,4 @@ See the table in the [README](README.md#privacy-and-security).
 
 ## Removing your data
 
-Uninstalling the extension deletes everything it stored. To remove only the key, clear the API key field in the settings.
+Uninstalling the extension deletes everything it stored. To remove only the key, clear the API key field in the settings. To remove saved summaries, press Clear under Advanced.

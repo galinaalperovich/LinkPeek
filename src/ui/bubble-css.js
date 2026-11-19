@@ -273,6 +273,18 @@
 }
 
 .lp-note { margin: 0 0 8px; color: var(--muted); font-size: 12px; }
+.lp-linkbtn {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--link);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.lp-linkbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .lp-status { display: flex; align-items: center; gap: 8px; margin: 2px 0 10px; color: var(--muted); font-size: 12.5px; }
 .lp-status[hidden], .lp-skeleton[hidden] { display: none; }

@@ -80,7 +80,7 @@ export async function startServer() {
   const requests = [];
   /** Source reputation requests, kept apart from the summaries and answers. */
   const reputationRequests = [];
-  const state = { chunkDelay: 6 };
+  const state = { chunkDelay: 6, changes: 0 };
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
@@ -158,6 +158,14 @@ export async function startServer() {
       }
 
       // ── Pages ──────────────────────────────────────────────────────────
+      if (url.pathname === '/changing.html') {
+        // Same address, different content on every request.
+        state.changes++;
+        return send(200, 'text/html; charset=utf-8', `<!doctype html><html lang="en"><head><meta charset="utf-8">
+          <title>Live scoreboard</title></head><body><article><h1>Live scoreboard</h1>
+          <p>${'The match is still being played and this page is rewritten after every point. '.repeat(6)}</p>
+          <p>Update number ${state.changes}.</p></article></body></html>`);
+      }
       if (url.pathname === '/legacy.html') return send(200, 'text/html', legacyPage());
       if (url.pathname === '/paper.pdf') return send(200, 'application/pdf', PDF);
       if (url.pathname === '/notes.txt') {

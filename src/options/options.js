@@ -17,6 +17,7 @@ import {
   saveSettings,
 } from '../lib/settings.js';
 import { listModels } from '../lib/providers.js';
+import { clearSummaries, countSummaries } from '../lib/summary-cache.js';
 
 const $ = (id) => document.getElementById(id);
 const CUSTOM = '__custom__';
@@ -254,6 +255,14 @@ window.addEventListener(
   true,
 );
 
+// ── Saved summaries ──────────────────────────────────────────────────────
+
+async function renderCacheCount() {
+  const count = await countSummaries().catch(() => 0);
+  $('cache-count').textContent = `Saved summaries: ${count}`;
+  $('clear-cache').disabled = count === 0;
+}
+
 // ── Wiring ───────────────────────────────────────────────────────────────
 
 async function init() {
@@ -273,6 +282,7 @@ async function init() {
   renderPresets();
   renderFormatState();
   renderTrigger();
+  renderCacheCount();
   scheduleKeyCheck(0);
 
   $('api-key').addEventListener('input', (event) => {
@@ -319,6 +329,11 @@ async function init() {
   });
   window.addEventListener('blur', () => capturing && setCapturing(false));
 
+  $('clear-cache').addEventListener('click', async () => {
+    await clearSummaries().catch(() => {});
+    await renderCacheCount();
+    flash('advanced', '\u2713 Cleared');
+  });
   $('reputation').addEventListener('change', (event) => {
     save({ reputation: event.target.checked }, { now: true });
   });

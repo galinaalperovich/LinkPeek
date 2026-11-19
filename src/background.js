@@ -1,7 +1,7 @@
 // LinkPeek service worker.
 //
 // The content script opens a port per request and sends one message:
-//   { type: 'summarize', url, linkText }
+//   { type: 'summarize', url, linkText, fresh? }   fresh: ignore the cache
 //   { type: 'ask', page, linkText, history, question }
 //   { type: 'reputation', page }     answered with { type: 'reputation', rating }
 // and gets back, in order:
@@ -9,7 +9,7 @@
 //   { type: 'page', page }           summarize only: what was read
 //   { type: 'delta', text }          a piece of the answer
 //   { type: 'reset' }                drop the answer so far, a new one follows
-//   { type: 'done', stopReason, detail }  or  { type: 'error', code, message, detail }
+//   { type: 'done', stopReason, detail, cachedAt? }  or  { type: 'error', code, message, detail }
 // Closing the port cancels everything, including a background tab in flight.
 
 import { loadSettings, resolveBaseUrl, resolveModel, resolveProvider } from './lib/settings.js';
@@ -17,6 +17,7 @@ import { LoadError, cleanupTempTabs, getPdf, loadPage } from './lib/page-loader.
 import { ProviderError, streamChat } from './lib/providers.js';
 import { buildMessages, buildSystem } from './lib/prompts.js';
 import { isRateable, rateSource, sourceKey } from './lib/reputation.js';
+import { readSummary, summaryKey, writeSummary } from './lib/summary-cache.js';
 
 const PORT_NAME = 'linkpeek';
 const MENU_ID = 'linkpeek-peek';
@@ -82,7 +83,12 @@ chrome.runtime.onConnect.addListener((port) => {
     // extension API so Chrome does not put the worker to sleep meanwhile.
     const keepAlive = setInterval(() => chrome.runtime.getPlatformInfo(() => {}), 20_000);
     try {
-      await handle(message, { post, signal: controller.signal, windowId: port.sender?.tab?.windowId });
+      await handle(message, {
+        post,
+        signal: controller.signal,
+        windowId: port.sender?.tab?.windowId,
+        incognito: Boolean(port.sender?.tab?.incognito),
+      });
     } catch (err) {
       if (!controller.signal.aborted) post(toErrorMessage(err));
     } finally {
@@ -91,7 +97,7 @@ chrome.runtime.onConnect.addListener((port) => {
   });
 });
 
-async function handle(message, { post, signal, windowId }) {
+async function handle(message, { post, signal, windowId, incognito }) {
   if (message?.type === 'reputation') return handleReputation(message, { post, signal });
   if (message?.type !== 'summarize' && message?.type !== 'ask') return;
 
@@ -121,21 +127,53 @@ async function handle(message, { post, signal, windowId }) {
     if (page.kind === 'pdf') page.pdf = await getPdf(page.url, signal);
   }
 
-  post({ type: 'status', stage: 'thinking' });
   const provider = resolveProvider(settings);
+  const model = resolveModel(settings, provider);
+  const system = buildSystem(settings.format);
+
+  // Same content, same format, same model as before? Then the summary made
+  // last time is still the right one. (Never in incognito windows: nothing
+  // from those is written to disk.)
+  let cacheKey = null;
+  if (message.type === 'summarize' && !incognito) {
+    try {
+      cacheKey = await summaryKey({ provider, model, system, page });
+      const hit = message.fresh ? null : await readSummary(cacheKey);
+      if (hit) {
+        post({ type: 'delta', text: hit.text });
+        post({ type: 'done', stopReason: 'end', detail: '', cachedAt: hit.at });
+        return;
+      }
+    } catch (err) {
+      console.warn('[LinkPeek] summary cache', err); // the cache is a convenience, never a blocker
+    }
+  }
+
+  post({ type: 'status', stage: 'thinking' });
   const stream = streamChat({
     provider,
+    model,
+    system,
     apiKey: settings.apiKey,
     baseUrl: resolveBaseUrl(settings, provider),
-    model: resolveModel(settings, provider),
-    system: buildSystem(settings.format),
     messages: buildMessages({ page, linkText, history, question }),
     signal,
   });
+  let answer = '';
   for await (const event of stream) {
-    if (event.type === 'text') post({ type: 'delta', text: event.text });
-    else if (event.type === 'reset') post({ type: 'reset' });
-    else if (event.type === 'done') post({ type: 'done', stopReason: event.stopReason, detail: event.detail });
+    if (event.type === 'text') {
+      answer += event.text;
+      post({ type: 'delta', text: event.text });
+    } else if (event.type === 'reset') {
+      answer = '';
+      post({ type: 'reset' });
+    } else if (event.type === 'done') {
+      // Only complete answers are kept: not cut-off ones, not refusals.
+      if (cacheKey && event.stopReason === 'end' && answer.trim()) {
+        await writeSummary(cacheKey, answer.trim()).catch(() => {});
+      }
+      post({ type: 'done', stopReason: event.stopReason, detail: event.detail });
+    }
   }
 }
 

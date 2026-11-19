@@ -112,6 +112,16 @@
     return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
   }
 
+  function timeAgo(timestamp) {
+    const minutes = Math.max(0, Math.round((Date.now() - timestamp) / 60_000));
+    if (minutes < 1) return 'just now';
+    if (minutes < 60) return `${minutes} min ago`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 24) return `${hours} h ago`;
+    const days = Math.round(hours / 24);
+    return `${days} day${days === 1 ? '' : 's'} ago`;
+  }
+
   function formatBytes(bytes) {
     if (!bytes) return '';
     return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
@@ -514,7 +524,7 @@
         text = text.trim();
         if (text) this.draw(target, text, false);
         else target.remove();
-        if (note) this.body.append(h('p', { class: 'lp-note', text: note }));
+        if (note) this.body.append(typeof note === 'string' ? h('p', { class: 'lp-note', text: note }) : note);
         if (text) onDone(text);
       };
 
@@ -538,6 +548,7 @@
           else if (message.stopReason === 'refusal') {
             note = `The model declined to ${text.trim() ? 'continue' : 'answer'}${message.detail ? ` (${message.detail} safety filter)` : ''}.`;
           } else if (!text.trim()) note = 'The model returned an empty answer.';
+          else if (message.cachedAt) note = this.cachedNote(message.cachedAt);
           finish(note);
         } else if (message.type === 'error') {
           settle();
@@ -559,18 +570,29 @@
       port.postMessage(request);
     }
 
-    summarize() {
+    // `fresh` skips the saved summary and asks the model again.
+    summarize(fresh = false) {
       this.setReputation(null);
       this.body.replaceChildren(this.skeleton);
       this.skeleton.hidden = false;
       this.setStatus(STAGE_TEXT.fetching);
-      this.run({ type: 'summarize', url: this.url, linkText: this.linkText }, {
+      this.run({ type: 'summarize', url: this.url, linkText: this.linkText, fresh }, {
         onDone: (text) => {
           this.summary = text;
           this.history = [{ role: 'assistant', text }];
         },
-        retry: () => this.summarize(),
+        retry: () => this.summarize(fresh),
       });
+    }
+
+    // Shown under a summary that was not made just now.
+    cachedNote(cachedAt) {
+      const again = h('button', { class: 'lp-linkbtn', type: 'button', text: 'Summarize again' });
+      again.addEventListener('click', () => {
+        if (!this.busy) this.summarize(true);
+      });
+      return h('p', { class: 'lp-note lp-cached' },
+        `Saved summary from ${timeAgo(cachedAt)}. The page has not changed since. `, again);
     }
 
     submit(preset) {

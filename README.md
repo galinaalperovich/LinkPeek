@@ -14,6 +14,7 @@ LinkPeek is a Chrome extension. It uses your own Claude (Anthropic) or OpenAI AP
 - **Summarizes the link, in place.** The page is read in the background; the summary streams into a bubble beside the link.
 - **Answers questions.** Type in the bubble to ask anything about the linked page. The conversation keeps its context.
 - **Shows who is talking.** The bubble's header names the author (or the publishing organization) and the date, next to a five-bar reputation meter for the source.
+- **Remembers.** Peek at the same page again and the saved summary appears at once, with no new request, as long as the page has not changed.
 - **Your format.** One plain-language prompt in the settings controls length, bullets or prose, language and tone. Three presets to start from.
 - **Reads what a plain fetch cannot.** Pages that need JavaScript are opened in a muted background tab, read, and closed again. PDFs are sent to the model as documents.
 - **One key.** Paste a Claude or an OpenAI key; LinkPeek tells them apart on its own.
@@ -43,6 +44,7 @@ You need an API key from [Anthropic](https://console.anthropic.com/settings/keys
 | Drag the bubble's header | Move it out of the way |
 | Click the title or ↗ | Open the page in a new tab after all |
 | Hover over the reputation meter | See what the rating means and why the source got it |
+| Click **Summarize again** under a saved summary | Get a fresh summary instead of the saved one |
 
 While an answer is streaming, the send button turns into a stop button.
 
@@ -53,6 +55,10 @@ If <kbd>X</kbd> clashes with a site's own keyboard shortcuts, pick another key i
 ![Hovering the reputation meter explains the rating](docs/reputation.png)
 
 Next to the site name, five bars and one word (Very high, High, Mixed, Low, Very low, or Unknown) say how far the publisher and author can generally be trusted. Hover over it for what the word means, why this source got it, and who decided. It is **the AI's estimate from its general knowledge, not a verified rating**: treat it as a prompt to think, not a verdict. The model is asked about the source only (site, publisher, author, title), never about what the page argues, and it is told to answer "Unknown" rather than guess. Ratings are asked once per source and remembered until you close the browser. You can switch the meter off under Advanced in the settings.
+
+### Saved summaries
+
+When a summary finishes, LinkPeek saves it on your device under a fingerprint (a SHA-256 hash) of the page's content, your format prompt and the model. The next time you peek at that link, the page is fetched again and fingerprinted; if nothing changed, the saved summary is shown at once and the model is not called. If the page, the format or the model changed, you get a new summary. Saved summaries are kept for 30 days, at most 300 of them, never from incognito windows, and can be cleared under Advanced in the settings.
 
 ### Local files
 
@@ -68,7 +74,7 @@ Click the LinkPeek toolbar icon.
 - **Model.** Defaults to Claude Opus 5.5 or GPT-6.2 Sol. Pick a smaller model for faster, cheaper peeks. The list also shows every model your key can use.
 - **Summary format.** The prompt that shapes every summary. For example: `Three bullets, then one sentence on why it matters. Always answer in English.` Edit it and press **Save**; the button lights up while there are unsaved changes and confirms with a green ✓. Choosing a preset applies it at once.
 - **Shortcut.** Press **Change key**, then the letter or digit you want to hold instead of <kbd>X</kbd> (<kbd>Alt</kbd>/<kbd>Option</kbd> works too).
-- **Advanced.** The reputation meter on or off, and a custom API base URL for proxies and OpenAI-compatible servers such as OpenRouter or a local Ollama (`http://localhost:11434/v1`).
+- **Advanced.** The reputation meter on or off, how many summaries are saved (with a Clear button), and a custom API base URL for proxies and OpenAI-compatible servers such as OpenRouter or a local Ollama (`http://localhost:11434/v1`).
 
 The key, model, shortcut and advanced options are saved as soon as you change them; a green "✓ Saved" appears in the corner of the card each time.
 
@@ -102,7 +108,7 @@ More detail in [PRIVACY.md](PRIVACY.md). The permissions, and why each is needed
 
 ## Cost
 
-Every peek sends the page text to your provider and is billed to your key. A typical article is roughly 2,000 to 8,000 input tokens plus a short reply; the longest page LinkPeek will send is about 25,000. With Claude, follow-up questions about the same page reuse the prompt cache. The reputation meter adds one very small request (a few hundred tokens) the first time you peek at a source in a browser session. If you peek a lot, choose a smaller model in the settings (Claude Haiku 5.5, GPT-6 Luna).
+Every peek sends the page text to your provider and is billed to your key. A typical article is roughly 2,000 to 8,000 input tokens plus a short reply; the longest page LinkPeek will send is about 25,000. Peeking at an unchanged page again is free: the saved summary is reused. With Claude, follow-up questions about the same page reuse the prompt cache. The reputation meter adds one very small request (a few hundred tokens) the first time you peek at a source in a browser session. If you peek a lot, choose a smaller model in the settings (Claude Haiku 5.5, GPT-6 Luna).
 
 ## Limitations
 
@@ -129,6 +135,7 @@ src/
   lib/providers.js     Claude and OpenAI streaming adapters
   lib/prompts.js       system prompt and message layout
   lib/reputation.js    source reputation: prompt, parsing, what is rateable
+  lib/summary-cache.js saved summaries, keyed by a hash of content, format and model
   lib/markdown.js      safe Markdown renderer
   lib/settings.js      defaults and storage
   options/             settings page, also the toolbar popup

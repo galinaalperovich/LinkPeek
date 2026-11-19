@@ -68,6 +68,7 @@ const BUBBLE_STATE = `(() => {
     inputDisabled: b.input.disabled,
     input: center(b.input),
     send: center(b.sendBtn),
+    again: b.body.querySelector('.lp-linkbtn') ? center(b.body.querySelector('.lp-linkbtn')) : null,
     close: center(b.head.querySelector('button[aria-label="Close"]')),
     head: { x: panel.x + 150, y: panel.y + 20 },
     panel: { x: panel.x, y: panel.y, width: panel.width, height: panel.height },
@@ -107,7 +108,12 @@ async function attach(page, extensionId) {
   };
 }
 
-async function peek(page, selector) {
+// Saved summaries would make repeat peeks skip the model, so every peek starts
+// from an empty cache unless a test is about the cache itself.
+let clearCache = async () => {};
+
+async function peek(page, selector, { keepCache = false } = {}) {
+  if (!keepCache) await clearCache();
   await page.keyboard.down('x');
   await page.click(selector);
   await page.keyboard.up('x');
@@ -163,6 +169,12 @@ try {
 
   admin = await context.newPage();
   await admin.goto(optionsUrl);
+  const cache = (fn) =>
+    admin.evaluate(async (name) => {
+      const api = await import(chrome.runtime.getURL('src/lib/summary-cache.js'));
+      return api[name]();
+    }, fn);
+  clearCache = () => cache('clearSummaries');
   await configure({ local: anthropic });
   const page = await context.newPage();
   await page.goto(`${server.origin}/`);
@@ -462,6 +474,49 @@ try {
     await configure({ sync: { reputation: true } });
   });
 
+  await step('an unchanged page is served from the saved summary, with no model call', async () => {
+    await peek(page, '#article'); // starts from an empty cache
+    await ext.settled();
+    assert.equal(await cache('countSummaries'), 1, 'the finished summary was saved');
+    const before = server.requests.length;
+
+    await peek(page, '#article', { keepCache: true });
+    const saved = await ext.settled();
+    assert.equal(server.requests.length, before, 'same content: the model is not asked again');
+    assert.match(saved.text, /TL;DR: A sourdough starter is a stable culture/);
+    assert.match(saved.text, /Saved summary from just now\. The page has not changed since\. Summarize again$/);
+    assert.equal(saved.turns, 1, 'a saved summary can be followed up like any other');
+
+    // "Summarize again" goes back to the model and replaces the saved copy.
+    await page.mouse.click(saved.again.x, saved.again.y);
+    const fresh = await waitFor(async () => {
+      const state = await ext.bubble();
+      return state && !state.busy && server.requests.length === before + 1 ? state : null;
+    }, { what: 'a fresh summary' });
+    assert.ok(!fresh.text.includes('Saved summary'), 'a fresh summary carries no cache note');
+    assert.equal(await cache('countSummaries'), 1);
+  });
+
+  await step('changed content, format or model makes a new summary', async () => {
+    await clearCache();
+    await peek(page, '#changing', { keepCache: true });
+    await ext.settled();
+    const before = server.requests.length;
+    await peek(page, '#changing', { keepCache: true }); // same address, new content
+    const state = await ext.settled();
+    assert.equal(server.requests.length, before + 1, 'the content hash differs, so the model is asked');
+    assert.ok(!state.text.includes('Saved summary'));
+
+    await peek(page, '#article', { keepCache: true });
+    await ext.settled();
+    const afterFirst = server.requests.length;
+    await configure({ sync: { format: 'One line only.' } });
+    await peek(page, '#article', { keepCache: true });
+    await ext.settled();
+    assert.equal(server.requests.length, afterFirst + 1, 'a new format is a new summary');
+    await configure({ sync: { format: 'placeholder' } });
+  });
+
   await step('stopping mid-answer keeps what has arrived', async () => {
     server.state.chunkDelay = 80;
     await peek(page, '#article');
@@ -475,6 +530,7 @@ try {
     assert.match(state.text, /Stopped\.$/);
     assert.ok(state.text.length < 500, 'the reply was cut short');
     assert.equal(state.turns, 1, 'the partial summary is kept for follow-ups');
+    assert.equal(await cache('countSummaries'), 0, 'a summary that was cut short is not saved');
   });
 
   await step('the model and format from settings are used', async () => {
@@ -614,6 +670,13 @@ try {
     assert.equal((await stored()).reputation, false);
     await options.check('#reputation');
     await waitFor(async () => (await stored()).reputation === true, { what: 'reputation setting to be stored' });
+    assert.match(await options.textContent('#cache-count'), /^Saved summaries: \d+$/);
+    if (!(await options.isDisabled('#clear-cache'))) {
+      await options.click('#clear-cache');
+      await waitFor(async () => (await options.textContent('#cache-count')) === 'Saved summaries: 0', { what: 'cache to clear' });
+      assert.equal(await cache('countSummaries'), 0);
+    }
+    assert.equal(await options.isDisabled('#clear-cache'), true, 'nothing left to clear');
     await options.fill('#base-url', `${server.origin}/openai`);
     await options.waitForSelector('#saved-advanced.show');
     await options.fill('#api-key', 'sk-test-openai-key');
