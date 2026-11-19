@@ -50,6 +50,10 @@ You can change the X key to any letter or digit in the settings.
 YOU BRING YOUR OWN KEY
 LinkPeek has no server, no account and no subscription. It talks directly to the AI provider whose key you enter, and that provider bills you for what you use. A typical summary costs between a fraction of a cent and a few cents, depending on the model you choose.
 
+SMALL AND EASY TO TRUST
+• Zero dependencies and no remote code: everything it runs is in the package, under 70 KB.
+• Open source, with no build step. The code you can read on GitHub is the code that runs.
+
 PRIVACY
 • Your API key is stored on your device only and is sent only to the provider it belongs to.
 • The text of a page is sent to your AI provider only when you peek at it. Nothing is sent anywhere else. There is no analytics and no tracking.

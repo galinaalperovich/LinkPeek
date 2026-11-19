@@ -3,7 +3,7 @@
 <h1>
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/hero-dark.png">
-    <img alt="LinkPeek. Peek at any link. Keep your focus. Every new tab breaks your concentration. Hold X, click a link, read the gist in place." src="docs/hero-light.png">
+    <img alt="LinkPeek. Peek at any link. Keep your focus. Every new tab breaks your concentration. Hold X, click a link, read the gist in place. Zero dependencies, under 70 KB, no server, open source." src="docs/hero-light.png">
   </picture>
 </h1>
 
@@ -12,12 +12,13 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/galinaalperovich/LinkPeek/test.yml?branch=main&style=flat-square&label=CI)](https://github.com/galinaalperovich/LinkPeek/actions/workflows/test.yml)
 [![MIT license](https://img.shields.io/badge/license-MIT-555555?style=flat-square)](LICENSE)
 [![Chrome Manifest V3](https://img.shields.io/badge/Chrome-Manifest%20V3-4285F4?style=flat-square)](manifest.json)
-[![No dependencies](https://img.shields.io/badge/dependencies-none-2e9e5b?style=flat-square)](#development)
+[![Zero dependencies](https://img.shields.io/badge/dependencies-zero-2e9e5b?style=flat-square)](#light-by-design)
+[![Under 70 KB](https://img.shields.io/badge/size-under%2070%20KB-2e9e5b?style=flat-square)](#light-by-design)
 [![Chrome Web Store](https://img.shields.io/badge/Chrome%20Web%20Store-coming%20soon-bf8a1f?style=flat-square)](#install)
 
 **[Chrome Web Store (coming soon)](#install) · [Privacy](PRIVACY.md) · [Store listing kit](store/listing.md)**
 
-[Install](#install) · [Use](#use) · [Designs](#designs) · [Settings](#settings) · [How a page is read](#how-a-page-is-read) · [Privacy](#privacy-and-security) · [Cost](#cost) · [Development](#development)
+[Install](#install) · [Use](#use) · [Designs](#designs) · [Settings](#settings) · [Light by design](#light-by-design) · [Privacy](#privacy-and-security) · [Cost](#cost) · [Development](#development)
 
 <code>git clone https://github.com/galinaalperovich/LinkPeek.git</code>
 
@@ -41,6 +42,7 @@ LinkPeek uses your own Claude (Anthropic) or OpenAI API key. It has no server of
 - **Your format.** One plain-language prompt controls length, bullets or prose, language and tone.
 - **Reads what a plain fetch cannot.** Pages that need JavaScript are opened in a muted background tab, read, and closed again. PDFs are sent to the model as documents.
 - **One key.** Paste a Claude or an OpenAI key; LinkPeek tells them apart on its own.
+- **Light.** Zero dependencies, under 70 KB, no server. See [Light by design](#light-by-design).
 
 ---
 
@@ -170,6 +172,18 @@ The key, model, design, shortcut and advanced options are saved as soon as you c
 
 Very long pages are cut at 100,000 characters (about 16,000 words); the bubble says so when it happens.
 
+## Light by design
+
+Most people are right to be wary of browser extensions. LinkPeek is built to be easy to trust:
+
+- **Zero dependencies.** Nothing is installed, bundled or downloaded. There is no `node_modules` in what you run, and no framework.
+- **Under 70 KB.** The whole extension is about 4,700 lines of plain JavaScript, HTML and CSS: small enough to read in an afternoon.
+- **No build step.** The files in this repository are the files Chrome runs. What you read is what executes.
+- **No remote code.** Nothing is loaded from the network, and there is no `eval`.
+- **No server.** LinkPeek talks only to the page you peek at and to the AI provider whose key you entered.
+
+A test ([test/unit/lightweight.test.js](test/unit/lightweight.test.js)) fails the build if a dependency, a non-local import, remote code or bloat ever creeps in.
+
 ## Privacy and security
 
 - Your API key is stored on your device, in the extension's own database, which web pages and the script LinkPeek runs inside them cannot read. It is sent only to the API it belongs to (or to the base URL you set).
@@ -206,7 +220,9 @@ Every peek sends the page text to your provider and is billed to your key. A typ
 
 ## Development
 
-Plain JavaScript, no bundler, no runtime dependencies. Edit a file, press the reload button on `chrome://extensions`, and it is live.
+Plain JavaScript, no bundler, zero dependencies. Edit a file, press the reload button on `chrome://extensions`, and it is live.
+
+The only package in `package.json` is Playwright, a development tool that drives the browser tests and takes the screenshots. It is never part of the extension.
 
 ```
 manifest.json

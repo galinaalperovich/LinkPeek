@@ -44,6 +44,16 @@
         color: var(--fg);
         font: 700 0.92em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       }
+      .facts { display: flex; gap: 9px; margin: 30px 0 0; padding: 0; list-style: none; }
+      .facts li {
+        padding: 6px 13px;
+        border: 1.5px solid color-mix(in srgb, var(--fg) 22%, transparent);
+        border-radius: 999px;
+        color: var(--fg);
+        font-size: 17px;
+        font-weight: 600;
+        white-space: nowrap;
+      }
       /* A browser-window frame around the real screenshot, running off the edge. */
       .shot {
         align-self: end;
@@ -70,6 +80,12 @@
       <div class="brand"><img src="../icons/icon.svg" alt="" />LinkPeek</div>
       <h1>Peek at any link.<br /><em>Keep your focus.</em></h1>
       <p>Every new tab breaks your concentration.<br />Hold <kbd>X</kbd>, click a link, read the gist in place.</p>
+      <ul class="facts">
+        <li>Zero dependencies</li>
+        <li>Under 70 KB</li>
+        <li>No server</li>
+        <li>Open source</li>
+      </ul>
     </section>
     <section class="shot">
       <div class="bar"><i></i><i></i><i></i></div>
