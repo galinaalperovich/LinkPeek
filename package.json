@@ -1,0 +1,20 @@
+{
+  "name": "linkpeek",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Chrome extension: hold X and click any link for an AI summary in a bubble, without leaving the page.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test test/unit/*.test.js",
+    "test:e2e": "node test/e2e/run.mjs",
+    "icons": "for s in 16 32 48 128; do rsvg-convert -w $s -h $s icons/icon.svg -o icons/icon-$s.png; done",
+    "zip": "rm -f linkpeek.zip && zip -r linkpeek.zip manifest.json icons src LICENSE -x '*.DS_Store' -x 'icons/icon.svg'"
+  },
+  "devDependencies": {
+    "playwright": "1.51.1"
+  }
+}

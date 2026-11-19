@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LinkPeek settings</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <header class="top">
+        <img src="../../icons/icon-128.png" width="40" height="40" alt="" />
+        <div class="top-text">
+          <h1>LinkPeek</h1>
+          <p>Hold <kbd id="hint-key">X</kbd> and click any link to peek at it.</p>
+        </div>
+        <span id="saved" class="saved" role="status" aria-live="polite"></span>
+      </header>
+
+      <section class="card" aria-labelledby="key-title">
+        <h2 id="key-title">API key</h2>
+        <p class="help">Paste a Claude or an OpenAI key. One key is all LinkPeek needs.</p>
+        <div class="key-field">
+          <input id="api-key" type="password" autocomplete="off" spellcheck="false"
+                 placeholder="sk-ant-…  or  sk-…" aria-label="API key" />
+          <button id="toggle-key" type="button" class="quiet">Show</button>
+        </div>
+        <p id="key-status" class="status" role="status" aria-live="polite"></p>
+
+        <label class="row" for="model">
+          <span>Model</span>
+          <select id="model"></select>
+        </label>
+        <input id="custom-model" type="text" spellcheck="false" placeholder="Model ID"
+               aria-label="Custom model ID" hidden />
+
+        <p class="help small">
+          No key yet? Create one at
+          <a id="link-anthropic" target="_blank" rel="noopener noreferrer">Anthropic</a> or
+          <a id="link-openai" target="_blank" rel="noopener noreferrer">OpenAI</a>.
+          The key is stored on this device only and is sent only to the provider it belongs to.
+        </p>
+      </section>
+
+      <section class="card" aria-labelledby="format-title">
+        <h2 id="format-title">Summary format</h2>
+        <p class="help">Say how you want summaries in plain words: length, bullets or prose, language, tone.</p>
+        <div id="presets" class="chips" role="group" aria-label="Format presets"></div>
+        <textarea id="format" rows="6" maxlength="4000" aria-label="Summary format instructions"></textarea>
+      </section>
+
+      <section class="card" aria-labelledby="shortcut-title">
+        <h2 id="shortcut-title">Shortcut</h2>
+        <div class="row">
+          <span>Hold <button id="trigger" type="button" class="keycap">X</button> and click a link</span>
+          <button id="reset-trigger" type="button" class="quiet">Reset</button>
+        </div>
+        <p id="trigger-help" class="help small">
+          Click the key to change it, then press a letter, a digit or Alt/Option.
+          You can also right-click any link and choose “Peek at this link”.
+        </p>
+      </section>
+
+      <details class="card">
+        <summary>Advanced</summary>
+        <label class="row" for="provider">
+          <span>Provider</span>
+          <select id="provider">
+            <option value="auto">Detect from the key</option>
+            <option value="anthropic">Claude (Anthropic)</option>
+            <option value="openai">OpenAI or compatible</option>
+          </select>
+        </label>
+        <label class="stack" for="base-url">
+          <span>API base URL</span>
+          <input id="base-url" type="url" spellcheck="false" placeholder="https://api.openai.com/v1" />
+        </label>
+        <p class="help small">
+          For proxies and OpenAI-compatible servers such as OpenRouter or a local Ollama
+          (<code>http://localhost:11434/v1</code>). Leave empty to use the official API.
+        </p>
+      </details>
+
+      <footer>LinkPeek <span id="version"></span> · open source under the MIT license</footer>
+    </main>
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

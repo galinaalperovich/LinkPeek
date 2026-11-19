@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>The Weekend Reader</title>
+    <style>
+      :root { color-scheme: light dark; --bg: #fbfaf7; --fg: #1d1d1f; --muted: #6e6e73; --line: #e6e3dc; --link: #0b57d0; }
+      @media (prefers-color-scheme: dark) { :root { --bg: #131416; --fg: #e9e9ea; --muted: #9a9ba1; --line: #2a2b30; --link: #8ab4ff; } }
+      body { margin: 0; background: var(--bg); color: var(--fg); font: 17px/1.6 Georgia, "Times New Roman", serif; }
+      main { max-width: 680px; margin: 0 auto; padding: 48px 24px 400px; }
+      h1 { margin: 0 0 4px; font-size: 34px; letter-spacing: -0.01em; }
+      .dek { margin: 0 0 28px; color: var(--muted); font-style: italic; }
+      article { padding: 18px 0; border-top: 1px solid var(--line); }
+      article h2 { margin: 0 0 4px; font-size: 21px; line-height: 1.3; }
+      article p { margin: 0; color: var(--muted); font-size: 15.5px; }
+      a { color: var(--link); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+      input { margin-top: 24px; padding: 8px 10px; font: 15px system-ui; width: 260px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>The Weekend Reader</h1>
+      <p class="dek">Five things worth your time this week.</p>
+
+      <article>
+        <h2><a id="article" href="/article.html">How a sourdough starter actually works</a></h2>
+        <p>Wild yeast, friendly bacteria, and why day four always looks like failure.</p>
+      </article>
+      <article>
+        <h2><a id="spa" href="/spa.html">Release notes that only exist after JavaScript runs</a></h2>
+        <p>A client-rendered page: nothing in the HTML, everything in the DOM.</p>
+      </article>
+      <article>
+        <h2><a id="pdf" href="/paper.pdf">A short paper, as a PDF</a></h2>
+        <p>Sent to the model as a document.</p>
+      </article>
+      <article>
+        <h2><a id="legacy" href="/legacy.html">Страница в старой кодировке</a></h2>
+        <p>A windows-1251 page, the kind UTF-8-only tools turn into question marks.</p>
+      </article>
+      <article>
+        <h2><a id="missing" href="/missing">A link that leads nowhere</a></h2>
+        <p>404, and LinkPeek should say so without calling the model.</p>
+      </article>
+      <article>
+        <h2><a id="notes" href="/notes.txt">Plain-text notes</a></h2>
+        <p>Not everything on the web is HTML. Also a <a id="hash" href="#top">same-page anchor</a>.</p>
+      </article>
+
+      <input id="search" type="text" placeholder="Search the archive" />
+    </main>
+    <script>
+      // The page's own global shortcuts and click tracking: LinkPeek must not
+      // feed them events that happen inside the bubble.
+      window.__pageKeys = [];
+      window.__pageClicks = 0;
+      document.addEventListener('keydown', (event) => window.__pageKeys.push(event.key));
+      document.addEventListener('click', () => window.__pageClicks++);
+    </script>
+  </body>
+</html>

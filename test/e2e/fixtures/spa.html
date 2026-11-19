@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Orbit 4.0 release notes</title>
+  </head>
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
+    <script>
+      // Everything a reader sees is created here, after load, the way a
+      // single-page app does it. A plain fetch of this URL gets an empty shell.
+      setTimeout(() => {
+        const paragraphs = [
+          'RENDERED_BY_JS Orbit 4.0 is the largest release since the project began. The scheduler was rewritten around a work-stealing queue, which cuts median job latency by 38 percent on the public benchmark suite.',
+          'The configuration format moves from YAML to TOML. Existing files keep working until 5.0, and the new orbit migrate command converts them in place while keeping comments.',
+          'Breaking changes are limited to the plugin API: the on_start hook now receives a context object instead of positional arguments. Plugins built for 3.x need a one-line change.',
+        ];
+        const article = document.createElement('article');
+        const heading = document.createElement('h1');
+        heading.textContent = 'Orbit 4.0 release notes';
+        article.append(heading);
+        for (const text of paragraphs) {
+          const p = document.createElement('p');
+          p.textContent = text;
+          article.append(p);
+        }
+        document.getElementById('root').append(article);
+      }, 400);
+    </script>
+  </body>
+</html>
