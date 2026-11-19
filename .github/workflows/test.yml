@@ -13,18 +13,20 @@ jobs:
     name: Unit tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
       - run: npm test
 
   e2e:
     name: End-to-end (extension in Chromium)
-    runs-on: ubuntu-latest
+    # Pinned: the Playwright version in package.json installs Chromium on
+    # Ubuntu 24.04, not on newer images. Move both forward together.
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
