@@ -411,6 +411,7 @@ try {
         let state = await demoExt.settled();
         await waitFor(async () => (await demoExt.bubble())?.reputation, { what: 'reputation meter' });
         await rest();
+        await demo.screenshot({ path: path.join(DOCS, `summary-${scheme}.png`), clip }); // used by the banner
         if (scheme === 'light') await storeShot(demo, '1-summary.jpg');
 
         await demo.mouse.click(state.input.x, state.input.y);
@@ -474,6 +475,20 @@ try {
         await gallery.screenshot({ path: path.join(DOCS, 'themes.png'), clip: { x: 0, y: 0, width: 2000, height } });
       } finally {
         await gallery.close();
+      }
+
+      // The README banner, rendered from docs/hero.html around the real screenshots.
+      const hero = await context.newPage();
+      try {
+        await hero.setViewportSize({ width: 1600, height: 640 });
+        for (const scheme of ['light', 'dark']) {
+          await hero.goto(`${pathToFileURL(path.join(DOCS, 'hero.html')).href}${scheme === 'dark' ? '#dark' : ''}`);
+          await hero.reload(); // a change of #fragment alone does not re-run the page
+          await hero.waitForFunction(() => [...document.images].filter((image) => image.offsetParent).every((image) => image.complete && image.naturalWidth));
+          await hero.screenshot({ path: path.join(DOCS, `hero-${scheme}.png`) });
+        }
+      } finally {
+        await hero.close();
       }
 
       if (STORE) {

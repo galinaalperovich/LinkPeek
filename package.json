@@ -13,7 +13,8 @@
     "test:e2e": "node test/e2e/run.mjs",
     "icons": "for s in 16 32 48 128; do rsvg-convert -w $s -h $s icons/icon.svg -o icons/icon-$s.png; done",
     "zip": "rm -f linkpeek-*.zip && zip -r -X \"linkpeek-$(node -p \"require('./manifest.json').version\").zip\" manifest.json icons src LICENSE -x '*.DS_Store' -x 'icons/icon.svg'",
-    "store": "STORE=1 node test/e2e/run.mjs"
+    "store": "STORE=1 node test/e2e/run.mjs",
+    "demo": "node scripts/record-demo.mjs"
   },
   "devDependencies": {
     "playwright": "1.51.1"
