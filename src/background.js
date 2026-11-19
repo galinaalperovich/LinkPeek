@@ -3,6 +3,7 @@
 // The content script opens a port per request and sends one message:
 //   { type: 'summarize', url, linkText }
 //   { type: 'ask', page, linkText, history, question }
+//   { type: 'reputation', page }     answered with { type: 'reputation', rating }
 // and gets back, in order:
 //   { type: 'status', stage }        'fetching' | 'rendering' | 'thinking'
 //   { type: 'page', page }           summarize only: what was read
@@ -15,10 +16,13 @@ import { loadSettings, resolveBaseUrl, resolveModel, resolveProvider } from './l
 import { LoadError, cleanupTempTabs, getPdf, loadPage } from './lib/page-loader.js';
 import { ProviderError, streamChat } from './lib/providers.js';
 import { buildMessages, buildSystem } from './lib/prompts.js';
+import { isRateable, rateSource, sourceKey } from './lib/reputation.js';
 
 const PORT_NAME = 'linkpeek';
 const MENU_ID = 'linkpeek-peek';
 const MAX_QUESTION_CHARS = 4000;
+const RATINGS_KEY = 'ratings'; // chrome.storage.session: forgotten when the browser closes
+const MAX_RATINGS = 300;
 
 cleanupTempTabs().catch(() => {});
 
@@ -88,6 +92,7 @@ chrome.runtime.onConnect.addListener((port) => {
 });
 
 async function handle(message, { post, signal, windowId }) {
+  if (message?.type === 'reputation') return handleReputation(message, { post, signal });
   if (message?.type !== 'summarize' && message?.type !== 'ask') return;
 
   const settings = await loadSettings();
@@ -132,6 +137,42 @@ async function handle(message, { post, signal, windowId }) {
     else if (event.type === 'reset') post({ type: 'reset' });
     else if (event.type === 'done') post({ type: 'done', stopReason: event.stopReason, detail: event.detail });
   }
+}
+
+// The reputation meter is an extra, never an error: when no rating can be had
+// (feature off, no key, a source nobody could know, a failed request) the
+// answer is `rating: null` and the bubble simply shows no meter.
+async function handleReputation(message, { post, signal }) {
+  let rating = null;
+  try {
+    const settings = await loadSettings();
+    const page = sanitizePage(message.page);
+    if (settings.apiKey && settings.reputation && page && isRateable(page)) {
+      const provider = resolveProvider(settings);
+      const model = resolveModel(settings, provider);
+      // One request per source, not per page: ratings are reused for the session.
+      const key = `${provider}|${model}|${sourceKey(page)}`;
+      const { [RATINGS_KEY]: ratings = {} } = await chrome.storage.session.get(RATINGS_KEY);
+      rating = ratings[key] || null;
+      if (!rating) {
+        rating = await rateSource({
+          page,
+          provider,
+          model,
+          apiKey: settings.apiKey,
+          baseUrl: resolveBaseUrl(settings, provider),
+          signal,
+        });
+        if (rating) {
+          const entries = Object.entries({ ...ratings, [key]: rating }).slice(-MAX_RATINGS);
+          await chrome.storage.session.set({ [RATINGS_KEY]: Object.fromEntries(entries) });
+        }
+      }
+    }
+  } catch (err) {
+    if (!signal.aborted) console.warn('[LinkPeek] reputation', err);
+  }
+  post({ type: 'reputation', rating });
 }
 
 // The page comes back from the content script on follow-up questions. Keep

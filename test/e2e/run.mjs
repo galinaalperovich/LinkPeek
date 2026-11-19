@@ -8,10 +8,10 @@
 
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { SOURDOUGH_ANSWER, startServer } from './server.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -47,7 +47,17 @@ const BUBBLE_STATE = `(() => {
   return {
     title: b.titleEl.textContent,
     href: b.titleEl.getAttribute('href'),
-    sub: b.subEl.textContent,
+    sub: [b.hostEl.textContent, b.factsEl.textContent].filter(Boolean).join(' '),
+    credit: b.creditEl.hidden ? '' : b.creditEl.textContent,
+    reputation: b.repEl.hidden ? null : {
+      label: b.repEl.textContent,
+      bars: b.repEl.querySelectorAll('.lp-meter i.on').length,
+      tone: b.repEl.className,
+      aria: b.repEl.getAttribute('aria-label'),
+      tip: b.tipEl.hidden ? '' : b.tipEl.innerText,
+      tipBox: b.tipEl.hidden ? null : (({ x, y, width, height }) => ({ x, y, width, height }))(b.tipEl.getBoundingClientRect()),
+      at: center(b.repEl),
+    },
     text: b.body.innerText,
     html: b.body.innerHTML,
     busy: b.busy,
@@ -170,6 +180,7 @@ try {
     assert.equal(summary.title, 'How a sourdough starter actually works');
     assert.equal(summary.href, `${server.origin}/article.html`);
     assert.match(summary.sub, /^127\.0\.0\.1 · \d+ min read$/);
+    assert.equal(summary.credit, 'Author: Mara Lindqvist, October 3, 2026', 'author and date in the header');
     assert.match(summary.text, /TL;DR: A sourdough starter is a stable culture/);
     assert.match(summary.html, /<strong>TL;DR:<\/strong>/);
     assert.equal((summary.html.match(/<li>/g) || []).length, 5, 'five bullet points');
@@ -216,6 +227,41 @@ try {
     for (const noise of ['NAV_NOISE', 'COOKIE_NOISE', 'ASIDE_NOISE', 'FOOTER_NOISE', 'SCRIPT_NOISE', 'HIDDEN_NOISE', '.promo']) {
       assert.ok(!text.includes(noise), `page text should not include ${noise}`);
     }
+  });
+
+  await step('the source gets a reputation meter, marked as an AI estimate', async () => {
+    const { reputation } = await waitFor(async () => {
+      const state = await ext.bubble();
+      return state?.reputation ? state : null;
+    }, { what: 'reputation meter' });
+    assert.equal(reputation.label, 'High');
+    assert.equal(reputation.bars, 4, 'four of five bars lit');
+    assert.match(reputation.tone, /lp-rep-good/);
+    assert.equal(reputation.tip, '', 'the explanation stays out of the way until hovered');
+    assert.match(reputation.aria, /^Source reputation: High, 4 of 5\. A generally reliable source\. .*Decided by AI/);
+
+    // It was rated from who published the page, not from what the page says.
+    assert.equal(server.reputationRequests.length, 1);
+    const { body } = server.reputationRequests[0];
+    const source = body.messages[0].content[0].text;
+    assert.ok(source.includes('<publisher>The Weekend Reader</publisher>'));
+    assert.ok(source.includes('<author>Mara Lindqvist</author>'));
+    assert.ok(!source.includes('small, stable ecosystem'), 'no page text in the rating request');
+    assert.equal(server.requests.length, 1, 'the summary request is separate');
+
+    // Hovering the meter says what "High" means, why, and that an AI decided it.
+    await page.mouse.move(reputation.at.x, reputation.at.y);
+    const hovered = (await ext.bubble()).reputation;
+    for (const piece of [
+      'Source reputation: High', '4 of 5', 'A generally reliable source.',
+      'Why: Established food magazine with named authors.',
+      'Decided by AI from what it knows about this publisher and author.', 'not a verified rating',
+    ]) assert.ok(hovered.tip.includes(piece), `hover card should say: ${piece}\n${hovered.tip}`);
+    const box = hovered.tipBox;
+    assert.ok(box.y > reputation.at.y, 'the card opens under the meter');
+    assert.ok(box.x >= 0 && box.x + box.width <= 1180 && box.y + box.height <= 820, 'inside the viewport');
+    await page.mouse.move(40, 780);
+    assert.equal((await ext.bubble()).reputation.tip, '', 'and goes away when the pointer leaves');
   });
 
   await step('asking a follow-up question answers in the bubble', async () => {
@@ -276,9 +322,20 @@ try {
         await page.keyboard.type('How long until it is ready?');
         await page.keyboard.press('Enter');
         await ext.settled(3);
+        await waitFor(async () => (await ext.bubble())?.reputation, { what: 'reputation meter' });
         await page.mouse.move(40, 780);
         await sleep(250);
         await page.screenshot({ path: path.join(DOCS, `bubble-${scheme}.png`), clip });
+        if (scheme === 'light') {
+          const { reputation, panel } = await ext.bubble();
+          await page.mouse.move(reputation.at.x, reputation.at.y);
+          await sleep(250);
+          await page.screenshot({
+            path: path.join(DOCS, 'reputation.png'),
+            clip: { x: panel.x - 12, y: panel.y - 12, width: panel.width + 24, height: 272 },
+          });
+          await page.mouse.move(40, 780);
+        }
         await ext.evaluate('globalThis.__linkpeek.bubble.close()');
       }
       await page.emulateMedia({ colorScheme: 'light' });
@@ -324,6 +381,8 @@ try {
 
     assert.equal(state.error, '');
     assert.equal(state.title, 'Orbit 4.0 release notes');
+    assert.equal(state.credit, '', 'no author or date on the page: no credit line');
+    assert.equal(state.reputation, null, 'nothing to rate on an unnamed local page');
     assert.equal(server.requests.length, requestsBefore + 1);
     const text = server.requests.at(-1).body.messages[0].content[0].text;
     assert.ok(text.includes('RENDERED_BY_JS Orbit 4.0 is the largest release'), 'text created by JavaScript was captured');
@@ -387,6 +446,20 @@ try {
     }, { origin: server.origin, url: `${server.origin}/article.html` });
     const state = await ext.settled();
     assert.match(state.text, /TL;DR: A sourdough starter/);
+    // Same source as before: the meter comes back without asking the model again.
+    await waitFor(async () => (await ext.bubble())?.reputation?.label === 'High', { what: 'cached reputation' });
+    assert.equal(server.reputationRequests.length, 1, 'one rating request per source');
+  });
+
+  await step('the reputation meter can be switched off', async () => {
+    const before = server.reputationRequests.length;
+    await configure({ sync: { reputation: false } });
+    await peek(page, '#article');
+    await ext.settled();
+    await sleep(400);
+    assert.equal((await ext.bubble()).reputation, null);
+    assert.equal(server.reputationRequests.length, before);
+    await configure({ sync: { reputation: true } });
   });
 
   await step('stopping mid-answer keeps what has arrived', async () => {
@@ -471,10 +544,13 @@ try {
     assert.ok(reachable.includes('"trigger"') || reachable.includes('"format"'), 'preferences are readable, as intended');
   });
 
-  await step('settings page: detects the key, verifies it, saves as you type', async () => {
+  await step('settings page: key check, explicit Save for the format, visible confirmations', async () => {
     await configure({ local: anthropic, sync: { format: 'placeholder' } });
     const options = await context.newPage();
     await options.goto(optionsUrl);
+    const stored = () => worker.evaluate(() => chrome.storage.sync.get(null));
+
+    // API key: detected, verified, masked.
     await options.waitForSelector('#key-status.ok');
     assert.equal(await options.textContent('#key-status'), '✓ Claude key works');
     assert.equal(await options.inputValue('#api-key'), 'sk-ant-test-key');
@@ -485,24 +561,61 @@ try {
       'Claude Experimental', 'Custom model ID…',
     ]);
 
+    // Summary format: nothing is applied until Save is pressed, and the page says so.
+    assert.equal(await options.isDisabled('#save-format'), true, 'nothing to save yet');
+    await options.fill('#format', 'Two sentences. In French.');
+    assert.equal(await options.isDisabled('#save-format'), false);
+    assert.equal(await options.textContent('#format-state'), 'Unsaved changes');
+    await sleep(900);
+    assert.equal((await stored()).format, 'placeholder', 'typing alone does not apply the format');
+    await options.click('#save-format');
+    await options.waitForSelector('#format-state.ok');
+    assert.match(await options.textContent('#format-state'), /^✓ Saved/);
+    assert.equal(await options.isDisabled('#save-format'), true);
+    assert.equal((await stored()).format, 'Two sentences. In French.');
+
+    // A preset is applied immediately, with the same confirmation.
     await options.click('#presets .chip:has-text("Brief")');
+    await options.waitForSelector('#format-state.ok');
+    await waitFor(async () => /^Summarize in 2 or 3 plain sentences/.test((await stored()).format), { what: 'preset to be stored' });
+    assert.equal(await options.getAttribute('#presets .chip:has-text("Brief")', 'aria-pressed'), 'true');
+
+    // Model: saved on change, confirmed in the corner of its card.
     await options.selectOption('#model', 'claude-sonnet-5-5');
-    await options.click('#trigger');
+    await options.waitForSelector('#saved-key.show');
+    assert.equal(await options.textContent('#saved-key'), '✓ Saved');
+    assert.equal((await stored()).models.anthropic, 'claude-sonnet-5-5');
+
+    // Shortcut: "Change key", then press the key.
+    assert.equal(await options.isDisabled('#reset-trigger'), true, 'already the default');
+    await options.click('#change-trigger');
+    assert.equal(await options.textContent('#trigger-key'), 'Press a key…');
+    assert.equal(await options.textContent('#change-trigger'), 'Cancel');
+    await options.keyboard.press('Escape');
+    assert.equal(await options.textContent('#trigger-key'), 'X', 'Esc cancels');
+    await options.click('#change-trigger');
     await options.keyboard.press('KeyG');
-    assert.equal(await options.textContent('#trigger'), 'G');
+    assert.equal(await options.textContent('#trigger-key'), 'G');
     assert.equal(await options.textContent('#hint-key'), 'G');
-    await options.waitForSelector('#saved.show');
-    await waitFor(async () => {
-      const stored = await worker.evaluate(() => chrome.storage.sync.get(null));
-      return stored.models?.anthropic === 'claude-sonnet-5-5' && stored.trigger?.code === 'KeyG' && /^Summarize in 2 or 3 plain sentences/.test(stored.format);
-    }, { what: 'settings to be stored' });
+    await options.waitForSelector('#saved-shortcut.show');
+    assert.equal((await stored()).trigger.code, 'KeyG');
+    await options.click('#reset-trigger');
+    assert.equal(await options.textContent('#trigger-key'), 'X');
+    await waitFor(async () => (await stored()).trigger.code === 'KeyX', { what: 'shortcut reset to be stored' });
 
     // A rejected key is reported; an OpenAI key flips the provider and model list.
     await options.fill('#api-key', 'sk-ant-bad');
     await options.waitForSelector('#key-status.bad');
     assert.match(await options.textContent('#key-status'), /rejected the API key/);
     await options.click('summary');
+    assert.equal(await options.isChecked('#reputation'), true, 'reputation meter is on by default');
+    await options.uncheck('#reputation');
+    await options.waitForSelector('#saved-advanced.show');
+    assert.equal((await stored()).reputation, false);
+    await options.check('#reputation');
+    await waitFor(async () => (await stored()).reputation === true, { what: 'reputation setting to be stored' });
     await options.fill('#base-url', `${server.origin}/openai`);
+    await options.waitForSelector('#saved-advanced.show');
     await options.fill('#api-key', 'sk-test-openai-key');
     await options.waitForSelector('#key-status.ok');
     assert.equal(await options.textContent('#key-status'), '✓ OpenAI key works');
@@ -510,11 +623,8 @@ try {
     assert.equal(openaiModels[0], 'GPT-6.2 Sol · everyday default (default)');
     assert.ok(!openaiModels.some((label) => label.includes('embedding')), 'non-chat models are hidden');
 
-    await options.click('#reset-trigger');
-    assert.equal(await options.textContent('#trigger'), 'X');
     await options.click('#presets .chip:has-text("Key points")');
-    await options.selectOption('#model', '');
-    await options.waitForSelector('#saved.show');
+    await options.waitForSelector('#format-state.ok');
     if (SHOTS) {
       await mkdir(DOCS, { recursive: true });
       // Still the mock endpoint: an example key must never be sent to a real API.
@@ -522,15 +632,19 @@ try {
       await options.fill('#api-key', 'sk-ant-api03-EXAMPLE-KEY-NOT-REAL');
       await options.waitForSelector('#key-status.ok');
       await options.selectOption('#model', '');
-      await options.waitForSelector('#saved.show');
-      await options.setViewportSize({ width: 660, height: 900 });
+      await options.waitForSelector('#saved-key.show');
+      await options.setViewportSize({ width: 660, height: 960 });
+      // Shown mid-edit, so the Save button and its hint are visible.
+      await options.fill('#format', (await options.inputValue('#format')).replace('150 words', '120 words'));
       await options.evaluate(() => {
         document.querySelector('details').open = false;
         document.activeElement?.blur();
         window.scrollTo(0, 0);
       });
-      await sleep(1400); // let the "Saved" note fade
+      await sleep(2600); // let the "Saved" notes fade
       await options.screenshot({ path: path.join(DOCS, 'settings.png'), fullPage: true });
+      await options.click('#presets .chip:has-text("Key points")');
+      await options.waitForSelector('#format-state.ok');
     }
     await options.close();
   });
@@ -541,6 +655,23 @@ try {
     assert.equal(await popup.evaluate(() => document.documentElement.classList.contains('popup')), true);
     assert.equal(await popup.evaluate(() => getComputedStyle(document.body).width), '400px');
     await popup.close();
+  });
+
+  await step('works on a local file:// page too', async () => {
+    const file = path.join(profile, 'local-notes.html');
+    await writeFile(file, `<!doctype html><meta charset="utf-8"><title>Local notes</title>
+      <p>My notes, with <a id="web" href="${server.origin}/article.html">a link to the web</a>.</p>`);
+    const local = await context.newPage();
+    await local.goto(pathToFileURL(file).href);
+    await local.bringToFront();
+    const localExt = await attach(local, extensionId);
+    await peek(local, '#web');
+    const state = await localExt.settled();
+    assert.equal(state.error, '');
+    assert.match(state.text, /TL;DR: A sourdough starter/);
+    assert.ok(local.url().startsWith('file://'), 'still on the local file');
+    await local.close();
+    await page.bringToFront();
   });
 
   await step('no helper tabs are left behind', async () => {

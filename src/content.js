@@ -19,6 +19,17 @@
   // Errors where trying again cannot help.
   const NO_RETRY = new Set(['reload', 'bad-url', 'unsupported', 'not-found', 'too-large', 'no-key']);
   const NEEDS_SETTINGS = new Set(['no-key', 'auth', 'model']);
+  // Index = level, as rated by the model (see lib/reputation.js).
+  const REPUTATION = [
+    { label: 'Unknown', tone: 'none', means: 'The AI does not know this source well enough to rate it.' },
+    { label: 'Very low', tone: 'bad', means: 'Known for unreliable or misleading content.' },
+    { label: 'Low', tone: 'bad', means: 'Often unreliable. Check its claims elsewhere.' },
+    { label: 'Mixed', tone: 'mid', means: 'Reliable for some things, not for others.' },
+    { label: 'High', tone: 'good', means: 'A generally reliable source.' },
+    { label: 'Very high', tone: 'good', means: 'Among the most reliable kinds of source.' },
+  ];
+  const REPUTATION_CAVEAT =
+    'Decided by AI from what it knows about this publisher and author. An estimate, not a verified rating.';
   const SVG_NS = 'http://www.w3.org/2000/svg';
   const ICONS = {
     close: ['M18 6 6 18', 'M6 6l12 12'],
@@ -90,6 +101,17 @@
     }
   }
 
+  // "2026-08-24T09:00:00Z" → "August 24, 2026". English, like the rest of the bubble.
+  function formatDate(raw) {
+    const text = String(raw || '').trim();
+    if (!text) return '';
+    const ymd = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/.exec(text);
+    // A calendar date is shown as written, not shifted into another time zone.
+    const date = ymd ? new Date(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3])) : new Date(text);
+    if (Number.isNaN(date.getTime())) return text.length <= 40 ? text : '';
+    return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  }
+
   function formatBytes(bytes) {
     if (!bytes) return '';
     return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
@@ -137,7 +159,13 @@
         class: 'lp-title', href: this.url, target: '_blank', rel: 'noopener noreferrer',
         title: this.url, text: this.linkText || prettyUrl(this.url), draggable: 'false',
       });
-      this.subEl = h('div', { class: 'lp-sub', text: host });
+      this.hostEl = h('span', { class: 'lp-host', text: host });
+      this.repEl = h('button', { class: 'lp-rep', type: 'button', hidden: true });
+      this.factsEl = h('span', { class: 'lp-facts' });
+      this.subEl = h('div', { class: 'lp-sub' }, this.hostEl, this.repEl, this.factsEl);
+      this.creditEl = h('div', { class: 'lp-credit', hidden: true });
+      // Explains the reputation meter on hover or keyboard focus.
+      this.tipEl = h('div', { class: 'lp-tip', role: 'tooltip', id: 'lp-rep-tip', hidden: true });
       this.copyBtn = h('button', { class: 'lp-icon', type: 'button', title: 'Copy summary', 'aria-label': 'Copy summary' }, icon('copy'));
       this.openEl = h('a', {
         class: 'lp-icon', href: this.url, target: '_blank', rel: 'noopener noreferrer',
@@ -146,7 +174,7 @@
       const closeBtn = h('button', { class: 'lp-icon', type: 'button', title: 'Close (Esc)', 'aria-label': 'Close' }, icon('close'));
       this.head = h('div', { class: 'lp-head' },
         h('div', { class: 'lp-avatar', text: (host[0] || '?'), 'aria-hidden': 'true' }),
-        h('div', { class: 'lp-titles' }, this.titleEl, this.subEl),
+        h('div', { class: 'lp-titles' }, this.titleEl, this.subEl, this.creditEl),
         this.copyBtn, this.openEl, closeBtn);
 
       this.skeleton = h('div', { class: 'lp-skeleton', 'aria-hidden': 'true' }, h('i'), h('i'), h('i'), h('i'));
@@ -163,9 +191,13 @@
       this.form = h('form', { class: 'lp-ask' }, this.input, this.sendBtn);
 
       this.panel = h('div', { class: 'lp', role: 'dialog', 'aria-label': 'LinkPeek summary' }, this.head, this.body, this.form);
-      this.root.append(this.panel);
+      this.root.append(this.panel, this.tipEl);
 
       closeBtn.addEventListener('click', () => this.close());
+      this.repEl.addEventListener('mouseenter', () => this.showTip());
+      this.repEl.addEventListener('mouseleave', () => this.hideTip());
+      this.repEl.addEventListener('focus', () => this.showTip());
+      this.repEl.addEventListener('blur', () => this.hideTip());
       this.copyBtn.addEventListener('click', () => this.copy());
       this.head.addEventListener('pointerdown', (event) => this.startDrag(event));
       this.input.addEventListener('input', () => this.syncInput());
@@ -236,6 +268,7 @@
         if (!dragging) {
           if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < 4) return;
           dragging = true;
+          this.hideTip();
           this.head.classList.add('lp-dragging');
           try {
             this.head.setPointerCapture(ev.pointerId);
@@ -313,13 +346,119 @@
       if (page.title) this.titleEl.textContent = page.title;
       for (const el of [this.titleEl, this.openEl]) el.setAttribute('href', page.url);
       this.titleEl.title = page.url;
-      const facts = [hostOf(page.url)];
+      const facts = [];
       if (page.kind === 'pdf') facts.push(['PDF', formatBytes(page.sizeBytes)].filter(Boolean).join(' '));
       else if (page.readMinutes) facts.push(`${page.readMinutes} min read`);
       if (page.truncated) facts.push('long page, first part only');
-      this.subEl.textContent = facts.filter(Boolean).join(' · ');
+      this.hostEl.textContent = hostOf(page.url);
+      this.factsEl.textContent = facts.length ? `· ${facts.join(' · ')}` : '';
+      this.setCredit(page);
+      this.requestReputation(page);
       this.input.disabled = false;
       this.syncInput();
+    }
+
+    // Third header line: who wrote the page and when, e.g.
+    // "Author: Berry Mingus, August 24, 2026". Falls back to the publishing
+    // organization, and is left out when the page says neither.
+    setCredit(page) {
+      const author = String(page.byline || '').replace(/^by\s+/i, '').trim();
+      const org = String(page.siteName || '').trim();
+      const date = formatDate(page.published);
+      const squash = (value) => value.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+      // "GitHub" under "github.com" says nothing new unless there is a date to go with it.
+      const orgRepeatsHost = Boolean(org) && squash(hostOf(page.url)).includes(squash(org));
+      let label = '';
+      let name = '';
+      if (author) [label, name] = ['Author', author];
+      else if (org && (date || !orgRepeatsHost)) [label, name] = ['Source', org];
+      else if (date) label = 'Published';
+
+      this.creditEl.hidden = !label;
+      if (!label) return;
+      const rest = [name, date].filter(Boolean).join(', ');
+      this.creditEl.replaceChildren(h('strong', { text: label }), `: ${rest}`);
+      this.creditEl.title = `${label}: ${rest}`;
+    }
+
+    // Asked separately from the summary, so a slow or failed rating never
+    // holds the summary up. No answer, no meter.
+    requestReputation(page) {
+      this.setReputation(null);
+      this.closeReputationPort();
+      let port;
+      try {
+        port = chrome.runtime.connect({ name: 'linkpeek' });
+      } catch {
+        return;
+      }
+      this.repPort = port;
+      port.onMessage.addListener((message) => {
+        if (message.type !== 'reputation' && message.type !== 'error') return;
+        if (!this.closed && this.repPort === port) this.setReputation(message.rating || null);
+        this.closeReputationPort();
+      });
+      port.onDisconnect.addListener(() => void chrome.runtime.lastError);
+      port.postMessage({
+        type: 'reputation',
+        page: { url: page.url, title: page.title, siteName: page.siteName, byline: page.byline },
+      });
+    }
+
+    closeReputationPort() {
+      try {
+        this.repPort?.disconnect();
+      } catch {
+        // already closed
+      }
+      this.repPort = null;
+    }
+
+    // A five-bar meter next to the site name. Hovering it explains the rating.
+    setReputation(rating) {
+      const known = rating && REPUTATION[rating.level];
+      this.repEl.hidden = !known;
+      this.hideTip();
+      if (!known) return;
+      const { label, tone, means } = known;
+      const bars = [1, 2, 3, 4, 5].map((n) => h('i', { class: n <= rating.level ? 'on' : null }));
+      this.repEl.className = `lp-rep lp-rep-${tone}`;
+      this.repEl.replaceChildren(h('span', { class: 'lp-meter', 'aria-hidden': 'true' }, ...bars), label);
+      const score = rating.level ? `${rating.level} of 5` : '';
+      const why = rating.reason ? `Why: ${rating.reason}.` : '';
+      this.tipEl.replaceChildren(
+        h('div', { class: 'lp-tip-title' },
+          h('strong', { text: `Source reputation: ${label}` }),
+          score ? h('span', { text: score }) : null),
+        h('div', { text: means }),
+        why ? h('div', { text: why }) : null,
+        h('div', { class: 'lp-tip-foot', text: REPUTATION_CAVEAT }),
+      );
+      // The same words for screen readers, which do not get the hover card.
+      this.repEl.setAttribute('aria-label',
+        [`Source reputation: ${label}${score ? `, ${score}` : ''}.`, means, why, REPUTATION_CAVEAT].filter(Boolean).join(' '));
+    }
+
+    // The card is a sibling of the panel, so the panel's rounded clipping
+    // cannot cut it off. It sits under the meter, or above when there is no room.
+    showTip() {
+      if (this.repEl.hidden || this.closed) return;
+      const tip = this.tipEl;
+      const chip = this.repEl.getBoundingClientRect();
+      const viewW = document.documentElement.clientWidth || window.innerWidth;
+      const width = Math.min(290, viewW - 16);
+      tip.hidden = false;
+      tip.style.width = `${width}px`;
+      tip.style.left = `${clamp(chip.left - 8, 8, viewW - width - 8)}px`;
+      const height = tip.offsetHeight;
+      // Under the whole header, so the card does not cover the author line.
+      const below = Math.max(chip.bottom + 7, this.head.getBoundingClientRect().bottom + 4);
+      const fitsBelow = below + height <= window.innerHeight - 8;
+      tip.style.top = `${fitsBelow ? below : Math.max(8, chip.top - 7 - height)}px`;
+    }
+
+    hideTip() {
+      this.tipEl.hidden = true;
     }
 
     draw(target, text, streaming) {
@@ -421,6 +560,7 @@
     }
 
     summarize() {
+      this.setReputation(null);
       this.body.replaceChildren(this.skeleton);
       this.skeleton.hidden = false;
       this.setStatus(STAGE_TEXT.fetching);
@@ -526,6 +666,7 @@
       if (this.closed) return;
       this.closed = true;
       cancelAnimationFrame(this.frame);
+      this.closeReputationPort();
       try {
         this.cancel?.();
       } catch {

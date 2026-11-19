@@ -53,6 +53,14 @@ function reply({ pageText, lastUserText, turns }) {
   return `**TL;DR:** Mock summary of "${titleOf(pageText)}".\n\n- First point\n- Second point`;
 }
 
+// A rating request is recognised by its system prompt. The "model" knows one source.
+const isRatingRequest = (system) => /rate how far a reader can generally trust/.test(String(system));
+function ratingReply(source) {
+  return /Weekend Reader/.test(source)
+    ? '{"level": 4, "reason": "Established food magazine with named authors"}'
+    : '{"level": 0, "reason": "Not a source I recognise"}';
+}
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function readJson(req) {
@@ -70,6 +78,8 @@ function pieces(text, size = 14) {
 export async function startServer() {
   /** Every model request the extension made: { api, headers, body }. */
   const requests = [];
+  /** Source reputation requests, kept apart from the summaries and answers. */
+  const reputationRequests = [];
   const state = { chunkDelay: 6 };
 
   const server = http.createServer(async (req, res) => {
@@ -95,14 +105,14 @@ export async function startServer() {
       }
       if (url.pathname === '/anthropic/v1/messages' && req.method === 'POST') {
         const body = await readJson(req);
-        requests.push({ api: 'anthropic', headers: req.headers, body });
+        const rating = isRatingRequest(body.system);
+        (rating ? reputationRequests : requests).push({ api: 'anthropic', headers: req.headers, body });
         const first = body.messages[0].content;
         const last = body.messages.at(-1).content;
-        const text = reply({
-          pageText: first.map((block) => block.text || '').join('\n'),
-          lastUserText: last.at(-1).text || '',
-          turns: body.messages.length,
-        });
+        const pageText = first.map((block) => block.text || '').join('\n');
+        const text = rating
+          ? ratingReply(pageText)
+          : reply({ pageText, lastUserText: last.at(-1).text || '', turns: body.messages.length });
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
         const emit = (event) => res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
         emit({ type: 'message_start', message: { id: 'msg_test', model: body.model, role: 'assistant', content: [] } });
@@ -127,14 +137,14 @@ export async function startServer() {
       }
       if (url.pathname === '/openai/chat/completions' && req.method === 'POST') {
         const body = await readJson(req);
-        requests.push({ api: 'openai', headers: req.headers, body });
+        const rating = isRatingRequest(body.messages[0]?.content);
+        (rating ? reputationRequests : requests).push({ api: 'openai', headers: req.headers, body });
         const asText = (content) => (typeof content === 'string' ? content : content.map((part) => part.text || '').join('\n'));
         const conversation = body.messages.filter((message) => message.role !== 'system');
-        const text = reply({
-          pageText: asText(conversation[0].content),
-          lastUserText: asText(conversation.at(-1).content),
-          turns: conversation.length,
-        });
+        const pageText = asText(conversation[0].content);
+        const text = rating
+          ? ratingReply(pageText)
+          : reply({ pageText, lastUserText: asText(conversation.at(-1).content), turns: conversation.length });
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
         const emit = (choice) => res.write(`data: ${JSON.stringify({ id: 'chatcmpl-test', model: body.model, choices: [choice] })}\n\n`);
         emit({ index: 0, delta: { role: 'assistant', content: '' } });
@@ -169,5 +179,5 @@ export async function startServer() {
 
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
-  return { origin, requests, state, close: () => new Promise((resolve) => server.close(resolve)) };
+  return { origin, requests, reputationRequests, state, close: () => new Promise((resolve) => server.close(resolve)) };
 }

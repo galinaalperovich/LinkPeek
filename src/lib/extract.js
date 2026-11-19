@@ -78,6 +78,14 @@
     return found;
   }
 
+  // Scholarly pages list authors one per tag, as "Last, First".
+  function citationAuthors(doc) {
+    const names = [...doc.querySelectorAll('meta[name="citation_author"]')]
+      .map((el) => clean(el.getAttribute('content')).replace(/^([^,]+),\s*(.+)$/, '$2 $1'))
+      .filter(Boolean);
+    return names.length > 3 ? `${names.slice(0, 3).join(', ')} et al.` : names.join(', ');
+  }
+
   function isHidden(el, live) {
     if (el.hidden) return true;
     const inline = el.getAttribute('style');
@@ -219,13 +227,16 @@
       clean(doc.title) ||
       ld.headline ||
       clean(doc.querySelector('h1')?.textContent);
-    const author = meta(doc, 'author', 'article:author', 'parsely-author');
-    const byline =
+    const author = meta(doc, 'author', 'article:author', 'parsely-author', 'dc.creator', 'DC.creator');
+    const byline = (
       (/^https?:/i.test(author) ? '' : author) ||
       ld.author ||
-      clean(doc.querySelector('[rel="author"], [itemprop="author"]')?.textContent).slice(0, 120);
+      citationAuthors(doc) ||
+      clean(doc.querySelector('[rel="author"], [itemprop="author"]')?.textContent)
+    ).slice(0, 120);
     const published =
-      meta(doc, 'article:published_time', 'datePublished', 'date', 'parsely-pub-date') ||
+      meta(doc, 'article:published_time', 'og:article:published_time', 'datePublished', 'date', 'pubdate',
+        'parsely-pub-date', 'dc.date', 'DC.date.issued', 'citation_publication_date', 'citation_date') ||
       ld.published ||
       clean(root.querySelector?.('time[datetime]')?.getAttribute('datetime'));
 

@@ -21,6 +21,8 @@ When you do:
 1. **The linked page is requested** from its own site, the same way your browser would load it, including your cookies for that site. This is what lets LinkPeek read pages you are signed in to. If the page needs JavaScript, it is opened in a background tab and then closed.
 2. **The page's text** (or the PDF), its address, title and the text of the link you clicked are **sent to your AI provider** together with your format prompt, to produce the summary. Follow-up questions send the same page again along with the conversation so far.
 
+3. **For the reputation meter**, the site's host name, publisher name, author and page title are sent to your AI provider in a separate small request, once per source per browser session. The page text is not part of that request. You can turn the meter off in the settings, under Advanced.
+
 Your provider is Anthropic (`api.anthropic.com`) for Claude keys and OpenAI (`api.openai.com`) for OpenAI keys, or the base URL you set under Advanced. What they do with the data is governed by their API terms and your account settings with them.
 
 Be thoughtful about peeking at links to private pages (documents, mail, internal tools): their content goes to your AI provider just like any other page.

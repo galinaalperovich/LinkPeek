@@ -80,6 +80,7 @@ const PREF_DEFAULTS = {
   models: { anthropic: '', openai: '' }, // '' means "use the provider default"
   format: DEFAULT_FORMAT,
   trigger: DEFAULT_TRIGGER,
+  reputation: true, // show the model's estimate of how trustworthy the source is
 };
 
 export const DEFAULTS = { ...SECRET_DEFAULTS, ...PREF_DEFAULTS };
@@ -127,6 +128,7 @@ function normalize(raw) {
     },
     format: (format || DEFAULT_FORMAT).slice(0, MAX_FORMAT_CHARS),
     trigger: normalizeTrigger(raw.trigger),
+    reputation: raw.reputation !== false,
   };
 }
 

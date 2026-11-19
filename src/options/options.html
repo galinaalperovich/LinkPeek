@@ -14,10 +14,10 @@
           <h1>LinkPeek</h1>
           <p>Hold <kbd id="hint-key">X</kbd> and click any link to peek at it.</p>
         </div>
-        <span id="saved" class="saved" role="status" aria-live="polite"></span>
       </header>
 
       <section class="card" aria-labelledby="key-title">
+        <span id="saved-key" class="saved" role="status" aria-live="polite"></span>
         <h2 id="key-title">API key</h2>
         <p class="help">Paste a Claude or an OpenAI key. One key is all LinkPeek needs.</p>
         <div class="key-field">
@@ -39,6 +39,7 @@
           <a id="link-anthropic" target="_blank" rel="noopener noreferrer">Anthropic</a> or
           <a id="link-openai" target="_blank" rel="noopener noreferrer">OpenAI</a>.
           The key is stored on this device only and is sent only to the provider it belongs to.
+          The key and the model are saved as soon as you change them.
         </p>
       </section>
 
@@ -47,23 +48,37 @@
         <p class="help">Say how you want summaries in plain words: length, bullets or prose, language, tone.</p>
         <div id="presets" class="chips" role="group" aria-label="Format presets"></div>
         <textarea id="format" rows="6" maxlength="4000" aria-label="Summary format instructions"></textarea>
+        <div class="actions">
+          <span id="format-state" class="state" role="status" aria-live="polite"></span>
+          <button id="save-format" type="button" class="primary" disabled>Save</button>
+        </div>
       </section>
 
       <section class="card" aria-labelledby="shortcut-title">
+        <span id="saved-shortcut" class="saved" role="status" aria-live="polite"></span>
         <h2 id="shortcut-title">Shortcut</h2>
-        <div class="row">
-          <span>Hold <button id="trigger" type="button" class="keycap">X</button> and click a link</span>
-          <button id="reset-trigger" type="button" class="quiet">Reset</button>
+        <div class="row stackable">
+          <span>Hold <kbd id="trigger-key" class="keycap">X</kbd> and click a link</span>
+          <span class="row-actions">
+            <button id="change-trigger" type="button" class="quiet">Change key</button>
+            <button id="reset-trigger" type="button" class="quiet">Reset to X</button>
+          </span>
         </div>
-        <p id="trigger-help" class="help small">
-          Click the key to change it, then press a letter, a digit or Alt/Option.
-          You can also right-click any link and choose “Peek at this link”.
-        </p>
+        <p id="trigger-help" class="help small"></p>
       </section>
 
       <details class="card">
         <summary>Advanced</summary>
-        <label class="row" for="provider">
+        <span id="saved-advanced" class="saved" role="status" aria-live="polite"></span>
+        <label class="check" for="reputation">
+          <input id="reputation" type="checkbox" />
+          <span>Show a reputation meter for the source</span>
+        </label>
+        <p class="help small tight">
+          The model's estimate of how far the publisher and author can generally be trusted.
+          It is not a verified rating. Uses one small extra request per source.
+        </p>
+        <label class="row spaced" for="provider">
           <span>Provider</span>
           <select id="provider">
             <option value="auto">Detect from the key</option>
