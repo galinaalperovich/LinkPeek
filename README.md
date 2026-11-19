@@ -13,7 +13,7 @@ LinkPeek is a Chrome extension. It uses your own Claude (Anthropic) or OpenAI AP
 
 - **Summarizes the link, in place.** The page is read in the background; the summary streams into a bubble beside the link. The link itself is highlighted while its bubble is open, so you always see what the bubble is about.
 - **Answers questions.** Type in the bubble to ask anything about the linked page. The conversation keeps its context.
-- **Shows who is talking.** The bubble's header names the author (or the publishing organization) and the date, next to a five-bar reputation meter for the source.
+- **Shows who is talking.** The bubble's header carries the site's own icon, the author (or the publishing organization) and the date, next to a five-bar reputation meter for the source.
 - **Remembers.** Peek at the same page again and the saved summary appears at once, with no new request, as long as the page has not changed.
 - **Your format.** One plain-language prompt in the settings controls length, bullets or prose, language and tone. Three presets to start from.
 - **Reads what a plain fetch cannot.** Pages that need JavaScript are opened in a muted background tab, read, and closed again. PDFs are sent to the model as documents.

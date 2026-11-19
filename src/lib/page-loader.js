@@ -152,9 +152,9 @@ export function neutralizeHandlers(html) {
   return html.replace(HTML_TAG, (tag) => tag.replace(HANDLER_ATTRIBUTE, '$1data-lp-on$2'));
 }
 
-async function parseHtml(html) {
+async function parseHtml(html, url) {
   await ensureOffscreen();
-  const message = { target: 'offscreen', type: 'extract', html: neutralizeHandlers(html) };
+  const message = { target: 'offscreen', type: 'extract', url, html: neutralizeHandlers(html) };
   let response;
   try {
     response = await chrome.runtime.sendMessage(message);
@@ -164,6 +164,57 @@ async function parseHtml(html) {
   }
   if (!response?.ok) throw new LoadError('Could not read that page.', 'parse');
   return response.result;
+}
+
+// ── Site icons ───────────────────────────────────────────────────────────
+
+const MAX_ICON_BYTES = 400 * 1024;
+const ICON_TIMEOUT_MS = 6000;
+
+/**
+ * The icon of the site behind a page, as raw pixels: `{ size, rgba }` with
+ * `rgba` base64-encoded, or null when the site has no usable icon. Tries the
+ * icon the page declares, then the conventional /favicon.ico.
+ */
+export async function loadIcon(pageUrl, declared, signal) {
+  const candidates = [];
+  if (declared && /^(https?:|data:image\/)/i.test(declared)) candidates.push(declared);
+  try {
+    candidates.push(new URL('/favicon.ico', pageUrl).href);
+  } catch {
+    // no usable page address: only the declared icon is tried
+  }
+  for (const candidate of new Set(candidates)) {
+    try {
+      const timeout = AbortSignal.timeout(ICON_TIMEOUT_MS);
+      const res = await fetch(candidate, {
+        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+        credentials: 'omit', // an icon is public; never send the reader's cookies for one
+      });
+      if (!res.ok) continue;
+      const { bytes, capped } = await readCapped(res, MAX_ICON_BYTES);
+      if (capped || bytes.byteLength < 30) continue;
+      const head = new TextDecoder('latin1').decode(bytes.subarray(0, 300)).trimStart().toLowerCase();
+      const type = (res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+      const svg = type === 'image/svg+xml' || head.startsWith('<svg') || (head.startsWith('<?xml') && head.includes('<svg'));
+      if (!svg && head.startsWith('<')) continue; // an HTML "not found" page, not an image
+      await ensureOffscreen();
+      // Decoding is quick; the timeout only guards against an answer that never comes.
+      const response = await Promise.race([
+        chrome.runtime.sendMessage({
+          target: 'offscreen',
+          type: 'icon',
+          bytes: toBase64(bytes),
+          mime: svg ? 'image/svg+xml' : type.startsWith('image/') ? type : 'image/x-icon',
+        }),
+        sleep(ICON_TIMEOUT_MS).then(() => null),
+      ]);
+      if (response?.ok) return response.result;
+    } catch (err) {
+      if (signal?.aborted) throw err;
+    }
+  }
+  return null;
 }
 
 // ── PDFs ─────────────────────────────────────────────────────────────────
@@ -245,7 +296,7 @@ async function fetchDirect(url, signal) {
       mime === 'text/html' ||
       mime === 'application/xhtml+xml' ||
       (!mime && /^\s*<(!doctype|html)/i.test(text.slice(0, 300)));
-    if (isHtml) return { kind: 'html', via: 'fetch', url: finalUrl, ...(await parseHtml(text)) };
+    if (isHtml) return { kind: 'html', via: 'fetch', url: finalUrl, ...(await parseHtml(text, finalUrl)) };
 
     // Plain text, Markdown, JSON, CSV, XML…
     return { kind: 'text', via: 'fetch', url: finalUrl, title: fileName(finalUrl), text: text.trim() };
@@ -305,7 +356,7 @@ async function extractInTab(tabId) {
       target: { tabId },
       func: () => ({
         url: location.href,
-        ...globalThis.LinkPeekExtract.extract(document, { live: true }),
+        ...globalThis.LinkPeekExtract.extract(document, { live: true, url: location.href }),
       }),
     });
     return injection?.result || null;

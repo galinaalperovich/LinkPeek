@@ -93,6 +93,16 @@
   text-transform: uppercase;
 }
 
+/* A real site icon sits on a white tile, so dark icons stay visible in dark designs. */
+.lp-avatar.lp-has-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #ffffff;
+  box-shadow: inset 0 0 0 1px rgba(20, 22, 28, 0.1);
+}
+.lp-favicon { display: block; width: 18px; height: 18px; border-radius: 3px; }
+
 .lp-titles { flex: 1; min-width: 0; }
 
 .lp-title {

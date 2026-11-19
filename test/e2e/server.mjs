@@ -3,6 +3,7 @@
 // machine and no real API key is involved.
 
 import http from 'node:http';
+import zlib from 'node:zlib';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -47,6 +48,45 @@ function legacyPage() {
   for (let byte = 0x80; byte <= 0xff; byte++) table.set(decoder.decode(new Uint8Array([byte])), byte);
   return Buffer.from([...text].map((ch) => (ch.charCodeAt(0) < 0x80 ? ch.charCodeAt(0) : table.get(ch) ?? 0x3f)));
 }
+
+// A solid-colour PNG, built by hand so the fixtures need no image files.
+function png(size, [r, g, b]) {
+  const crcTable = Array.from({ length: 256 }, (_, n) => {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    return c >>> 0;
+  });
+  const crc = (buffer) => {
+    let c = 0xffffffff;
+    for (const byte of buffer) c = crcTable[(c ^ byte) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  };
+  const chunk = (type, data) => {
+    const body = Buffer.concat([Buffer.from(type), data]);
+    const head = Buffer.alloc(4);
+    head.writeUInt32BE(data.length);
+    const tail = Buffer.alloc(4);
+    tail.writeUInt32BE(crc(body));
+    return Buffer.concat([head, body, tail]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(size, 0);
+  header.writeUInt32BE(size, 4);
+  header[8] = 8; // bits per channel
+  header[9] = 2; // RGB
+  const row = Buffer.concat([Buffer.from([0]), Buffer.alloc(size * 3, Buffer.from([r, g, b]))]);
+  const pixels = zlib.deflateSync(Buffer.concat(Array.from({ length: size }, () => row)));
+  return Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    chunk('IHDR', header), chunk('IDAT', pixels), chunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
+/** The colour of the test site's icon, to recognise it in the bubble. */
+export const ICON_COLOR = [36, 99, 235];
+const ICON_PNG = png(32, ICON_COLOR);
+// The demo site's icon is an SVG, to exercise that path too.
+const BYTE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#4f46e5"/><path fill="#fff" d="M20 14h15c7 0 11 3.6 11 9 0 3.6-1.900 6.200-5 7.500 4.200 1.100 7 4.300 7 8.800C48 45.900 43.300 50 35.500 50H20zm8 6.500v8h6c3 0 4.700-1.500 4.700-4s-1.700-4-4.700-4zm0 14.200v8.800h7c3.300 0 5.100-1.600 5.100-4.400s-1.800-4.400-5.100-4.400z"/></svg>`;
 
 const PDF = Buffer.from(
   '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n' +
@@ -97,7 +137,7 @@ export async function startServer() {
   const requests = [];
   /** Source reputation requests, kept apart from the summaries and answers. */
   const reputationRequests = [];
-  const state = { chunkDelay: 6, changes: 0 };
+  const state = { chunkDelay: 6, changes: 0, iconRequests: 0, faviconRequests: 0, faviconByHost: {} };
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
@@ -182,6 +222,21 @@ export async function startServer() {
           <title>Live scoreboard</title></head><body><article><h1>Live scoreboard</h1>
           <p>${'The match is still being played and this page is rewritten after every point. '.repeat(6)}</p>
           <p>Update number ${state.changes}.</p></article></body></html>`);
+      }
+      // The browser fetches icons for its own tabs too ("image" requests). Only
+      // the extension's fetches are counted; those are plain fetch() calls.
+      const fromExtension = req.headers['sec-fetch-dest'] === 'empty';
+      if (url.pathname === '/icon.png') {
+        if (fromExtension) state.iconRequests++;
+        return send(200, 'image/png', ICON_PNG);
+      }
+      if (url.pathname === '/byte.svg') return send(200, 'image/svg+xml', BYTE_SVG);
+      if (url.pathname === '/favicon.ico') {
+        if (fromExtension) state.faviconRequests++; // this site has none: the address answers 404
+        // Chrome sends no fetch metadata to plain-http sites, so also count per site name.
+        const site = String(req.headers.host || '').split(':')[0];
+        state.faviconByHost[site] = (state.faviconByHost[site] || 0) + 1;
+        return send(404, 'text/html; charset=utf-8', '<h1>404 Not Found</h1>');
       }
       if (url.pathname === '/legacy.html') return send(200, 'text/html', legacyPage());
       if (url.pathname === '/paper.pdf') return send(200, 'application/pdf', PDF);

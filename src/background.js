@@ -4,6 +4,7 @@
 //   { type: 'summarize', url, linkText, fresh? }   fresh: ignore the cache
 //   { type: 'ask', page, linkText, history, question }
 //   { type: 'reputation', page }     answered with { type: 'reputation', rating }
+//   { type: 'icon', url, icon }      answered with { type: 'icon', icon }
 // and gets back, in order:
 //   { type: 'status', stage }        'fetching' | 'rendering' | 'thinking'
 //   { type: 'page', page }           summarize only: what was read
@@ -13,7 +14,7 @@
 // Closing the port cancels everything, including a background tab in flight.
 
 import { loadSettings, resolveBaseUrl, resolveModel, resolveProvider } from './lib/settings.js';
-import { LoadError, cleanupTempTabs, getPdf, loadPage } from './lib/page-loader.js';
+import { LoadError, cleanupTempTabs, getPdf, loadIcon, loadPage, normalizeUrl } from './lib/page-loader.js';
 import { ProviderError, streamChat } from './lib/providers.js';
 import { buildMessages, buildSystem } from './lib/prompts.js';
 import { isRateable, rateSource, sourceKey } from './lib/reputation.js';
@@ -24,6 +25,8 @@ const MENU_ID = 'linkpeek-peek';
 const MAX_QUESTION_CHARS = 4000;
 const RATINGS_KEY = 'ratings'; // chrome.storage.session: forgotten when the browser closes
 const MAX_RATINGS = 300;
+const ICONS_KEY = 'icons'; // chrome.storage.session too: one icon per site
+const MAX_ICONS = 60;
 
 cleanupTempTabs().catch(() => {});
 
@@ -99,6 +102,7 @@ chrome.runtime.onConnect.addListener((port) => {
 
 async function handle(message, { post, signal, windowId, incognito }) {
   if (message?.type === 'reputation') return handleReputation(message, { post, signal });
+  if (message?.type === 'icon') return handleIcon(message, { post, signal });
   if (message?.type !== 'summarize' && message?.type !== 'ask') return;
 
   const settings = await loadSettings();
@@ -175,6 +179,27 @@ async function handle(message, { post, signal, windowId, incognito }) {
       post({ type: 'done', stopReason: event.stopReason, detail: event.detail });
     }
   }
+}
+
+// The site's icon for the bubble header. Like the reputation meter it is an
+// extra: no icon, no error, and the bubble keeps its letter.
+async function handleIcon(message, { post, signal }) {
+  let icon = null;
+  try {
+    const pageUrl = normalizeUrl(message.url);
+    const site = new URL(pageUrl).host;
+    const { [ICONS_KEY]: icons = {} } = await chrome.storage.session.get(ICONS_KEY);
+    if (site in icons) {
+      icon = icons[site]; // may be null: a site already known to have no icon
+    } else {
+      icon = await loadIcon(pageUrl, typeof message.icon === 'string' ? message.icon : '', signal);
+      const entries = Object.entries({ ...icons, [site]: icon }).slice(-MAX_ICONS);
+      await chrome.storage.session.set({ [ICONS_KEY]: Object.fromEntries(entries) });
+    }
+  } catch (err) {
+    if (!signal.aborted) console.warn('[LinkPeek] icon', err);
+  }
+  post({ type: 'icon', icon });
 }
 
 // The reputation meter is an extra, never an error: when no rating can be had

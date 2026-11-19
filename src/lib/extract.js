@@ -86,6 +86,35 @@
     return names.length > 3 ? `${names.slice(0, 3).join(', ')} et al.` : names.join(', ');
   }
 
+  // The page's own icon (what the browser shows in the tab), as an absolute
+  // address. Of several, the sharpest one that is not needlessly large.
+  function iconUrl(doc, pageUrl) {
+    let best = '';
+    let bestScore = -1;
+    for (const link of doc.querySelectorAll('link[rel][href]')) {
+      const rel = ` ${link.getAttribute('rel').toLowerCase()} `;
+      const touch = rel.includes(' apple-touch-icon');
+      if (!rel.includes(' icon ') && !touch) continue; // "mask-icon" and the like are not usable
+      const href = link.getAttribute('href').trim();
+      if (!href || href.length > 20000) continue;
+      const declared = Number(/(\d+)x\d+/.exec(link.getAttribute('sizes') || '')?.[1] || 0);
+      const vector = /svg/i.test(link.getAttribute('type') || '') || /\.svg([?#]|$)/i.test(href);
+      // Unsized icons are usually 16 px; touch icons are large and clean.
+      const score = vector ? 96 : declared ? Math.min(declared, 192) : touch ? 150 : 16;
+      if (score > bestScore) {
+        best = href;
+        bestScore = score;
+      }
+    }
+    if (!best) return '';
+    try {
+      const base = doc.querySelector('base[href]')?.getAttribute('href') || '';
+      return new URL(best, new URL(base, pageUrl || doc.baseURI)).href;
+    } catch {
+      return '';
+    }
+  }
+
   function isHidden(el, live) {
     if (el.hidden) return true;
     const inline = el.getAttribute('style');
@@ -212,10 +241,12 @@
 
   /**
    * @param {Document} doc
-   * @param {{ live?: boolean }} [options] live: the document is rendered in a
-   *        tab, so computed styles and shadow roots can be consulted.
+   * @param {{ live?: boolean, url?: string }} [options]
+   *        live: the document is rendered in a tab, so computed styles and
+   *        shadow roots can be consulted. url: the page's address, needed to
+   *        resolve relative links in a document that was parsed from text.
    */
-  function extract(doc, { live = false } = {}) {
+  function extract(doc, { live = false, url = '' } = {}) {
     const ld = structuredData(doc);
     const root = pickRoot(doc);
     let text = serialize(root, live);
@@ -250,6 +281,7 @@
       published: published.slice(0, 60),
       description: (meta(doc, 'og:description', 'description', 'twitter:description') || ld.description).slice(0, 1000),
       lang: clean(doc.documentElement?.getAttribute('lang')).slice(0, 20),
+      icon: iconUrl(doc, url),
       text,
       wordCount: words + cjkChars,
       readMinutes: Math.max(1, Math.round(words / 230 + cjkChars / 500)),

@@ -14,7 +14,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { SOURDOUGH_ANSWER, startServer } from './server.mjs';
+import { ICON_COLOR, SOURDOUGH_ANSWER, startServer } from './server.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const DOCS = path.join(ROOT, 'docs');
@@ -54,6 +54,12 @@ const BUBBLE_STATE = `(() => {
   const panel = b.panel.getBoundingClientRect();
   return {
     title: b.titleEl.textContent,
+    avatar: b.avatarEl.textContent,
+    // The colour in the middle of the site icon, when a real icon was drawn.
+    icon: (() => {
+      const canvas = b.avatarEl.querySelector('canvas');
+      return canvas ? [...canvas.getContext('2d').getImageData(32, 32, 1, 1).data] : null;
+    })(),
     href: b.titleEl.getAttribute('href'),
     sub: [b.hostEl.textContent, b.factsEl.textContent].filter(Boolean).join(' '),
     credit: b.creditEl.hidden ? '' : b.creditEl.textContent,
@@ -152,7 +158,7 @@ const context = await chromium.launchPersistentContext(profile, {
   viewport: { width: 1180, height: 820 },
   args: [
     `--disable-extensions-except=${EXT}`, `--load-extension=${EXT}`, '--no-first-run',
-    `--host-resolver-rules=MAP ${DEMO_HOST} 127.0.0.1`,
+    '--host-resolver-rules=MAP *.example 127.0.0.1', // made-up site names for the fixtures
   ],
 });
 
@@ -211,6 +217,16 @@ try {
     assert.equal(summary.inputDisabled, false);
     assert.ok(summary.topLayer, 'bubble is in the top layer');
     assert.equal(context.pages().length, tabs, 'a readable page needs no extra tab');
+  });
+
+  await step("the bubble shows the site's own icon", async () => {
+    const { icon } = await waitFor(async () => {
+      const state = await ext.bubble();
+      return state?.icon ? state : null;
+    }, { what: 'site icon' });
+    assert.deepEqual(icon, [...ICON_COLOR, 255], 'the pixels of the icon the page declares (a relative link, resolved)');
+    assert.equal(server.state.iconRequests, 1);
+    assert.equal(server.state.faviconRequests, 0, 'the declared icon was found, so /favicon.ico is not tried');
   });
 
   await step('the clicked link is marked while its bubble is open', async () => {
@@ -514,6 +530,24 @@ try {
     assert.equal(await page.getAttribute('#notes', 'style'), before, 'restored exactly');
     assert.match(await page.$eval('#legacy', (el) => el.style.outline), /rgb\(245, 165, 36\)/);
     await page.$eval('#notes', (el) => el.removeAttribute('style'));
+  });
+
+  await step('a site with no icon keeps its letter, and icons are fetched once per site', async () => {
+    assert.equal(server.state.iconRequests, 1, 'many peeks at the same site, one icon request');
+    // Another site, which declares no icon and has none at /favicon.ico.
+    await page.evaluate((href) => {
+      const link = Object.assign(document.createElement('a'), { id: 'other-site', href, textContent: 'A page on another site' });
+      document.querySelector('main').prepend(link);
+    }, `http://plain.example:${new URL(server.origin).port}/notes.txt`);
+    await peek(page, '#other-site');
+    const state = await ext.settled();
+    await waitFor(() => server.state.faviconByHost['plain.example'] === 1, { what: 'the /favicon.ico attempt' });
+    await sleep(200);
+    assert.equal(state.error, '');
+    assert.equal((await ext.bubble()).icon, null);
+    assert.equal((await ext.bubble()).avatar, 'p', 'first letter of plain.example');
+    await page.keyboard.press('Escape');
+    await page.$eval('#other-site', (el) => el.remove());
   });
 
   await step('a dead link says so and never calls the model', async () => {

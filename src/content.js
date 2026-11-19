@@ -207,6 +207,8 @@
         class: 'lp-title', href: this.url, target: '_blank', rel: 'noopener noreferrer',
         title: this.url, text: this.linkText || prettyUrl(this.url), draggable: 'false',
       });
+      // The site's first letter until (and unless) its real icon arrives.
+      this.avatarEl = h('div', { class: 'lp-avatar', text: (host[0] || '?'), 'aria-hidden': 'true' });
       this.hostEl = h('span', { class: 'lp-host', text: host });
       this.repEl = h('button', { class: 'lp-rep', type: 'button', hidden: true });
       this.factsEl = h('span', { class: 'lp-facts' });
@@ -221,7 +223,7 @@
       }, icon('open'));
       const closeBtn = h('button', { class: 'lp-icon', type: 'button', title: 'Close (Esc)', 'aria-label': 'Close' }, icon('close'));
       this.head = h('div', { class: 'lp-head' },
-        h('div', { class: 'lp-avatar', text: (host[0] || '?'), 'aria-hidden': 'true' }),
+        this.avatarEl,
         h('div', { class: 'lp-titles' }, this.titleEl, this.subEl, this.creditEl),
         this.copyBtn, this.openEl, closeBtn);
 
@@ -402,6 +404,7 @@
       this.factsEl.textContent = facts.length ? `· ${facts.join(' · ')}` : '';
       this.setCredit(page);
       this.requestReputation(page);
+      this.requestIcon(page);
       this.input.disabled = false;
       this.syncInput();
     }
@@ -451,6 +454,50 @@
         type: 'reputation',
         page: { url: page.url, title: page.title, siteName: page.siteName, byline: page.byline },
       });
+    }
+
+    // The site's own icon, fetched and decoded by the service worker.
+    requestIcon(page) {
+      if (this.iconFor === page.url) return; // a retry of the same page keeps its icon
+      this.iconFor = page.url;
+      let port;
+      try {
+        port = chrome.runtime.connect({ name: 'linkpeek' });
+      } catch {
+        return;
+      }
+      this.iconPort = port;
+      const done = () => {
+        try {
+          port.disconnect();
+        } catch {
+          // already closed
+        }
+        if (this.iconPort === port) this.iconPort = null;
+      };
+      port.onMessage.addListener((message) => {
+        if (message.type !== 'icon' && message.type !== 'error') return;
+        if (!this.closed && message.icon) this.setIcon(message.icon);
+        done();
+      });
+      port.onDisconnect.addListener(() => void chrome.runtime.lastError);
+      port.postMessage({ type: 'icon', url: page.url, icon: page.icon || '' });
+    }
+
+    // Painted from raw pixels onto a canvas: no image request is made from the
+    // page, so a site's security policy cannot block it.
+    setIcon(icon) {
+      try {
+        const side = icon.size;
+        const pixels = Uint8ClampedArray.from(atob(icon.rgba), (ch) => ch.charCodeAt(0));
+        if (side !== 64 || pixels.length !== side * side * 4) return;
+        const canvas = h('canvas', { class: 'lp-favicon', width: side, height: side });
+        canvas.getContext('2d').putImageData(new ImageData(pixels, side, side), 0, 0);
+        this.avatarEl.replaceChildren(canvas);
+        this.avatarEl.classList.add('lp-has-icon');
+      } catch {
+        // keep the letter
+      }
     }
 
     closeReputationPort() {
@@ -727,6 +774,11 @@
       this.closed = true;
       cancelAnimationFrame(this.frame);
       this.closeReputationPort();
+      try {
+        this.iconPort?.disconnect();
+      } catch {
+        // already closed
+      }
       this.unmarkLink();
       try {
         this.cancel?.();
