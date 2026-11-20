@@ -16,34 +16,58 @@
         </div>
       </header>
 
-      <section class="card" aria-labelledby="key-title">
+      <section class="card" aria-labelledby="mode-title">
         <span id="saved-key" class="saved" role="status" aria-live="polite"></span>
-        <h2 id="key-title">API key</h2>
-        <p class="help">Paste a Claude or an OpenAI key. One key is all LinkPeek needs.</p>
-        <div class="key-field">
-          <input id="api-key" type="password" autocomplete="off" spellcheck="false"
-                 placeholder="sk-ant-…  or  sk-…" aria-label="API key" />
-          <button id="toggle-key" type="button" class="quiet">Show</button>
+        <h2 id="mode-title">Who writes the summaries</h2>
+        <p class="help">Two ways to use LinkPeek. Pick one; you can switch at any time.</p>
+        <div id="modes" class="modes" role="radiogroup" aria-labelledby="mode-title">
+          <button type="button" class="mode" role="radio" data-mode="keyless" aria-checked="false">
+            <span class="mode-name">Keyless <span class="tag">free</span></span>
+            <span class="mode-what">Chrome's built-in AI, on this computer. No key, no account, and the page is not sent to any AI service.</span>
+            <span class="mode-limits">Short summaries in one set format: a TL;DR and key points. A few languages only: English, Spanish, Japanese, German, French.</span>
+          </button>
+          <button type="button" class="mode" role="radio" data-mode="key" aria-checked="false">
+            <span class="mode-name">Your key <span class="tag plain">best quality</span></span>
+            <span class="mode-what">Your own Claude or OpenAI key. The page is sent to that provider, and each summary is billed to you.</span>
+            <span class="mode-limits">Any format you describe, however long or detailed. Almost any language. Also long pages, PDFs and a sharper reputation meter.</span>
+          </button>
         </div>
-        <p id="key-status" class="status" role="status" aria-live="polite"></p>
 
-        <label class="row" for="model">
-          <span>Model</span>
-          <select id="model"></select>
-        </label>
-        <input id="custom-model" type="text" spellcheck="false" placeholder="Model ID"
-               aria-label="Custom model ID" hidden />
+        <div id="keyless-panel" class="panel" hidden>
+          <p id="builtin-status" class="status" role="status" aria-live="polite">Checking this computer…</p>
+          <progress id="builtin-progress" max="1" value="0" hidden></progress>
+          <div class="actions start">
+            <button id="builtin-on" type="button" class="primary" hidden>Turn on</button>
+          </div>
+        </div>
 
-        <p class="help small">
-          No key yet? Create one at
-          <a id="link-anthropic" target="_blank" rel="noopener noreferrer">Anthropic</a> or
-          <a id="link-openai" target="_blank" rel="noopener noreferrer">OpenAI</a>.
-          The key is stored on this device only and is sent only to the provider it belongs to.
-          The key and the model are saved as soon as you change them.
-        </p>
+        <div id="key-panel" class="panel" hidden>
+          <div class="key-field">
+            <input id="api-key" type="password" autocomplete="off" spellcheck="false"
+                   placeholder="sk-ant-…  or  sk-…" aria-label="API key" />
+            <button id="toggle-key" type="button" class="quiet">Show</button>
+          </div>
+          <p id="key-status" class="status" role="status" aria-live="polite"></p>
+
+          <label class="row" for="model">
+            <span>Model</span>
+            <select id="model"></select>
+          </label>
+          <input id="custom-model" type="text" spellcheck="false" placeholder="Model ID"
+                 aria-label="Custom model ID" hidden />
+
+          <p class="help small">
+            Paste a Claude or an OpenAI key; one is all LinkPeek needs. No key yet? Create one at
+            <a id="link-anthropic" target="_blank" rel="noopener noreferrer">Anthropic</a> or
+            <a id="link-openai" target="_blank" rel="noopener noreferrer">OpenAI</a>.
+            The key is stored on this device only and is sent only to the provider it belongs to.
+            The key and the model are saved as soon as you change them.
+          </p>
+        </div>
       </section>
 
-      <section class="card" aria-labelledby="format-title">
+      <!-- Shown for "Your key" only: Keyless has one set format. -->
+      <section id="format-card" class="card" aria-labelledby="format-title" hidden>
         <h2 id="format-title">Summary format</h2>
         <p class="help">Say how you want summaries in plain words: length, bullets or prose, language, tone.</p>
         <div id="presets" class="chips" role="group" aria-label="Format presets"></div>
@@ -84,7 +108,8 @@
         </label>
         <p class="help small tight">
           The model's estimate of how far the publisher and author can generally be trusted.
-          It is not a verified rating. Uses one small extra request per source.
+          It is not a verified rating. Uses one small extra request per source. In Keyless it
+          comes from Chrome's small on-device model, so it is rougher.
         </p>
         <div class="row spaced">
           <span id="cache-count">Saved summaries: 0</span>
@@ -95,7 +120,7 @@
           shows it instantly, as long as the page's content has not changed.
         </p>
         <label class="row spaced" for="provider">
-          <span>Provider</span>
+          <span>Provider for your key</span>
           <select id="provider">
             <option value="auto">Detect from the key</option>
             <option value="anthropic">Claude (Anthropic)</option>

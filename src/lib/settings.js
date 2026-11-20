@@ -65,6 +65,7 @@ export const PROVIDERS = {
   anthropic: {
     id: 'anthropic',
     label: 'Claude',
+    maker: 'Anthropic',
     baseUrl: 'https://api.anthropic.com',
     keyUrl: 'https://console.anthropic.com/settings/keys',
     defaultModel: 'claude-opus-5-5',
@@ -77,6 +78,7 @@ export const PROVIDERS = {
   openai: {
     id: 'openai',
     label: 'OpenAI',
+    maker: 'OpenAI',
     baseUrl: 'https://api.openai.com/v1',
     keyUrl: 'https://platform.openai.com/api-keys',
     defaultModel: 'gpt-6.2-sol',
@@ -87,11 +89,30 @@ export const PROVIDERS = {
       { id: 'gpt-6-luna', label: 'GPT-6 Luna', hint: 'cheapest' },
     ],
   },
+  // No key, no account, no network: the model that ships with Chrome, run on
+  // this computer (see builtin-ai.js). This is what "Keyless" uses.
+  builtin: {
+    id: 'builtin',
+    label: "Chrome's built-in AI",
+    baseUrl: '',
+    keyUrl: '',
+    defaultModel: 'gemini-nano',
+    models: [{ id: 'gemini-nano', label: 'Gemini Nano', hint: 'runs on this computer' }],
+  },
 };
+const KEY_PROVIDERS = ['anthropic', 'openai'];
+
+/**
+ * Who writes the summaries. The reader picks one in the settings:
+ *   keyless  Chrome's built-in AI, on this computer. Free, private, limited.
+ *   key      their own Claude or OpenAI key. Best quality, billed to them.
+ */
+export const MODES = ['keyless', 'key'];
 
 const SECRET_DEFAULTS = { apiKey: '', baseUrl: '' };
 const PREF_DEFAULTS = {
-  provider: 'auto', // 'auto' | 'anthropic' | 'openai'
+  mode: '', // one of MODES; '' until the reader has chosen (see resolveMode)
+  provider: 'auto', // for "key" mode: 'auto' | 'anthropic' | 'openai'
   models: { anthropic: '', openai: '' }, // '' means "use the provider default"
   format: DEFAULT_FORMAT,
   trigger: DEFAULT_TRIGGER,
@@ -108,9 +129,39 @@ export function detectProvider(apiKey) {
   return key.startsWith('sk-ant-') ? 'anthropic' : 'openai';
 }
 
-export function resolveProvider(settings) {
-  if (settings.provider === 'anthropic' || settings.provider === 'openai') return settings.provider;
+/**
+ * The mode in force. Before the reader has chosen (a fresh install, or a copy
+ * from before the choice existed) a saved key means "key", no key "keyless".
+ */
+export function resolveMode(settings) {
+  if (MODES.includes(settings.mode)) return settings.mode;
+  return String(settings.apiKey || '').trim() ? 'key' : 'keyless';
+}
+
+/** The provider the API key is used with, whatever the mode. */
+export function resolveKeyProvider(settings) {
+  if (KEY_PROVIDERS.includes(settings.provider)) return settings.provider;
   return detectProvider(settings.apiKey) || 'anthropic';
+}
+
+/** Who answers: Chrome's built-in AI in keyless mode, else the key's provider. */
+export function resolveProvider(settings) {
+  return resolveMode(settings) === 'keyless' ? 'builtin' : resolveKeyProvider(settings);
+}
+
+/** Who answers, in a few words, for the bubble's footer. */
+export function engineLabel(provider, settings) {
+  if (provider === 'builtin') return 'AI running on this device';
+  // A custom base URL can be anyone's server: name the server, not a company.
+  const custom = String(settings?.baseUrl || '').trim();
+  if (custom) {
+    try {
+      return `AI provided by ${new URL(custom).host}`;
+    } catch {
+      // not an address: fall through to the provider's name
+    }
+  }
+  return `AI provided by ${PROVIDERS[provider].maker}`;
 }
 
 export function resolveModel(settings, provider = resolveProvider(settings)) {
@@ -137,7 +188,8 @@ function normalize(raw) {
   return {
     apiKey: String(raw.apiKey || '').trim(),
     baseUrl: String(raw.baseUrl || '').trim(),
-    provider: ['anthropic', 'openai'].includes(raw.provider) ? raw.provider : 'auto',
+    mode: MODES.includes(raw.mode) ? raw.mode : '',
+    provider: KEY_PROVIDERS.includes(raw.provider) ? raw.provider : 'auto',
     models: {
       anthropic: String(raw.models?.anthropic || '').trim(),
       openai: String(raw.models?.openai || '').trim(),

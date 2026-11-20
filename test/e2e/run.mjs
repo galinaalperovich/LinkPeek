@@ -1,6 +1,8 @@
 // End-to-end test: loads the real extension into Chromium and drives it the
 // way a person would (hold X, click a link), against local fixture pages and
 // mock Claude / OpenAI endpoints. No real API key, nothing leaves the machine.
+// Chrome's built-in AI is played by a stand-in (see FAKE_MODEL): the browser
+// used here ships without the model. `npm run test:ondevice` uses the real one.
 //
 //   npm run test:e2e              headless
 //   HEADED=1 npm run test:e2e     watch it happen
@@ -15,6 +17,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ICON_COLOR, SOURDOUGH_ANSWER, startServer } from './server.mjs';
+import { attach, sleep, waitFor } from './helpers.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const DOCS = path.join(ROOT, 'docs');
@@ -27,111 +30,100 @@ const STORE_DIR = path.join(ROOT, 'store');
 // Screenshots show a believable site name instead of 127.0.0.1.
 const DEMO_HOST = 'bytereview.example';
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-async function waitFor(check, { timeout = 15_000, what = 'condition' } = {}) {
-  const deadline = Date.now() + timeout;
-  let last;
-  while (Date.now() < deadline) {
-    try {
-      last = await check();
-      if (last) return last;
-    } catch (err) {
-      last = err;
+// A stand-in for Chrome's Prompt API (window.LanguageModel), with the shape
+// and the behaviour measured on the real one in Chrome 158: availability
+// states, a download that needs a click and reports progress, sessions with a
+// context window, streamed replies, cancellation. Its "summary" is wrapped in
+// a tag, as the real small model sometimes does. Everything it is asked is
+// kept in `target.__fakeModel` for the tests to read.
+const FAKE_MODEL = (target, config) => {
+  const log = (target.__fakeModel = {
+    state: 'available', window: 9216, hang: false, created: 0, prompts: [], ratings: [], active: 0, aborted: 0, ...config,
+  });
+  const count = (input) =>
+    Math.ceil((typeof input === 'string' ? input : input.map((message) => message.content).join(' ')).length / 4);
+  const cancelled = () => new DOMException('The request was cancelled.', 'AbortError');
+  class Session {
+    constructor(options) {
+      this.options = options;
+      this.contextUsage = count(options.initialPrompts?.[0]?.content || '');
     }
-    await sleep(60);
+    get contextWindow() {
+      return log.window;
+    }
+    async measureContextUsage(input) {
+      return count(input);
+    }
+    async clone() {
+      return new Session(this.options);
+    }
+    destroy() {}
+    promptStreaming(input, { signal } = {}) {
+      const system = this.options.initialPrompts?.[0]?.content || '';
+      if (system.startsWith('You rate how far a reader can generally trust')) {
+        // The source rating. One publisher it "knows"; for anything else it
+        // does what the real small model does: a guess that admits it.
+        log.ratings.push({ input, duringAnswer: log.active > 0 });
+        const known = input[0].content.includes('<publisher>The Weekend Reader</publisher>');
+        const answer = known
+          ? '{"level": 4, "reason": "An established food magazine with editorial standards"}'
+          : '{"level": 3, "reason": "Unknown outlet, but the author appears credible, so moderate trust"}';
+        return (async function* rating() {
+          yield answer.slice(0, 20);
+          yield answer.slice(20);
+        })();
+      }
+      log.prompts.push({ system, languages: this.options.expectedOutputs?.[0]?.languages, input });
+      const question = input.length > 1 ? input[input.length - 1].content : '';
+      const title = /<title>(.*?)<\/title>/.exec(input[0].content)?.[1] || 'the page';
+      const reply = question
+        ? `On this device: ${question}`
+        : `<summary>\n**TL;DR:** ${title}, summarized on this device.\n\n- First point\n- Second point\n</summary>`;
+      const pieces = reply.match(/[\s\S]{1,9}/g);
+      return (async function* stream() {
+        log.active++;
+        try {
+          yield* answer();
+        } finally {
+          log.active--;
+        }
+      })();
+      async function* answer() {
+        for (const [index, piece] of pieces.entries()) {
+          if (signal?.aborted) throw cancelled();
+          if (log.hang && index === 3) {
+            // Goes quiet mid-answer until the reader presses Stop.
+            await new Promise((_, reject) => {
+              signal.addEventListener('abort', () => {
+                log.aborted++;
+                reject(cancelled());
+              });
+            });
+          }
+          yield piece;
+        }
+      }
+    }
   }
-  throw new Error(`Timed out waiting for ${what}. Last value: ${last instanceof Error ? last.message : JSON.stringify(last)}`);
-}
-
-// The bubble lives in a closed shadow root that page scripts (and Playwright
-// selectors) cannot enter. Tests look at it from the content script's own
-// isolated world, through the DevTools protocol.
-const BUBBLE_STATE = `(() => {
-  const b = globalThis.__linkpeek?.bubble;
-  if (!b) return null;
-  const center = (el) => { const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; };
-  const panel = b.panel.getBoundingClientRect();
-  return {
-    title: b.titleEl.textContent,
-    avatar: b.avatarEl.textContent,
-    // The colour in the middle of the site icon, when a real icon was drawn.
-    icon: (() => {
-      const canvas = b.avatarEl.querySelector('canvas');
-      return canvas ? [...canvas.getContext('2d').getImageData(32, 32, 1, 1).data] : null;
-    })(),
-    href: b.titleEl.getAttribute('href'),
-    sub: [b.hostEl.textContent, b.factsEl.textContent].filter(Boolean).join(' '),
-    credit: b.creditEl.hidden ? '' : b.creditEl.textContent,
-    reputation: b.repEl.hidden ? null : {
-      label: b.repEl.querySelector('.lp-rep-label').textContent,
-      score: (() => {
-        const el = b.repEl.querySelector('.lp-rep-score'); // absent for "Unknown"
-        return el && getComputedStyle(el).display !== 'none' ? el.textContent : '';
-      })(),
-      bars: b.repEl.querySelectorAll('.lp-meter i.on').length,
-      tone: b.repEl.className,
-      aria: b.repEl.getAttribute('aria-label'),
-      tip: b.tipEl.hidden ? '' : b.tipEl.innerText,
-      tipBox: b.tipEl.hidden ? null : (({ x, y, width, height }) => ({ x, y, width, height }))(b.tipEl.getBoundingClientRect()),
-      at: center(b.repEl),
+  target.LanguageModel = {
+    availability: async () => log.state,
+    async create(options = {}) {
+      if (log.state !== 'available') {
+        if (!target.navigator.userActivation?.isActive) throw new DOMException('Requires a user gesture.', 'NotAllowedError');
+        const monitor = new EventTarget();
+        options.monitor?.(monitor);
+        log.state = 'downloading';
+        for (const loaded of [0, 0.42, 1]) {
+          await new Promise((resolve) => setTimeout(resolve, 400));
+          monitor.dispatchEvent(Object.assign(new Event('downloadprogress'), { loaded, total: 1 }));
+        }
+        log.state = 'available';
+      }
+      log.created++;
+      return new Session(options);
     },
-    text: b.body.innerText,
-    html: b.body.innerHTML,
-    busy: b.busy,
-    turns: b.history.length,
-    status: b.statusEl.hidden ? '' : b.statusText.textContent,
-    error: b.body.querySelector('.lp-error-msg')?.textContent || '',
-    buttons: [...b.body.querySelectorAll('.lp-btn')].map((el) => el.textContent),
-    inputDisabled: b.input.disabled,
-    input: center(b.input),
-    send: center(b.sendBtn),
-    again: b.body.querySelector('.lp-linkbtn') ? center(b.body.querySelector('.lp-linkbtn')) : null,
-    close: center(b.head.querySelector('button[aria-label="Close"]')),
-    head: { x: panel.x + 150, y: panel.y + 20 },
-    panel: { x: panel.x, y: panel.y, width: panel.width, height: panel.height },
-    topLayer: b.host.matches(':popover-open'),
-    theme: b.panel.className,
-    fontSize: getComputedStyle(b.panel).fontSize,
-    titleAt: center(b.titleEl),
-    tip: b.tipEl.hidden ? '' : b.tipEl.innerText,
-    tipTheme: b.tipEl.className,
-    background: getComputedStyle(b.panel).backgroundColor,
-    bodyFont: getComputedStyle(b.body.querySelector('.lp-md') || b.body).fontFamily,
   };
-})()`;
-
-async function attach(page, extensionId) {
-  const cdp = await page.context().newCDPSession(page);
-  const contexts = new Map();
-  cdp.on('Runtime.executionContextCreated', ({ context }) => contexts.set(context.id, context));
-  cdp.on('Runtime.executionContextDestroyed', ({ executionContextId }) => contexts.delete(executionContextId));
-  cdp.on('Runtime.executionContextsCleared', () => contexts.clear());
-  await cdp.send('Runtime.enable');
-
-  const evaluate = async (expression) => {
-    const world = [...contexts.values()].find(
-      (context) => context.auxData?.type === 'isolated' && String(context.origin).includes(extensionId),
-    );
-    if (!world) throw new Error('LinkPeek content script world not found');
-    const { result, exceptionDetails } = await cdp.send('Runtime.evaluate', {
-      expression, contextId: world.id, returnByValue: true, awaitPromise: true,
-    });
-    if (exceptionDetails) throw new Error(exceptionDetails.exception?.description || exceptionDetails.text);
-    return result.value;
-  };
-
-  return {
-    evaluate,
-    bubble: () => evaluate(BUBBLE_STATE),
-    /** Waits until a reply has fully arrived (or an error is shown). */
-    settled: (turns = 1) =>
-      waitFor(async () => {
-        const state = await evaluate(BUBBLE_STATE);
-        return state && !state.busy && (state.turns >= turns || state.error) ? state : null;
-      }, { what: `bubble to settle with ${turns} turn(s)` }),
-  };
-}
+};
 
 // Saved summaries would make repeat peeks skip the model, so every peek starts
 // from an empty cache unless a test is about the cache itself.
@@ -186,6 +178,9 @@ try {
       await saveSettings(patch);
     }, { ...local, ...sync });
   const anthropic = { apiKey: 'sk-ant-test-key', baseUrl: `${server.origin}/anthropic` };
+  // The key points at the local stand-in, so that is who the footer names.
+  // (The real names, "Anthropic" and "OpenAI", are covered by the unit tests.)
+  const viaMock = `AI provided by ${new URL(server.origin).host}`;
   const openai = { apiKey: 'sk-test-openai-key', baseUrl: `${server.origin}/openai` };
 
   console.log(`LinkPeek e2e · extension ${extensionId} · fixtures at ${server.origin}\n`);
@@ -227,6 +222,8 @@ try {
     assert.equal((summary.html.match(/<li>/g) || []).length, 5, 'five bullet points');
     assert.ok(!summary.text.includes('**'), 'no raw Markdown left');
     assert.equal(summary.inputDisabled, false);
+    assert.equal(summary.engine, viaMock, 'the footer names who made the answer');
+    assert.equal(summary.footSize, '9px', 'in the smallest text of the bubble');
     assert.ok(summary.topLayer, 'bubble is in the top layer');
     assert.equal(context.pages().length, tabs, 'a readable page needs no extra tab');
   });
@@ -399,6 +396,18 @@ try {
       await demo.goto(`http://${DEMO_HOST}:${new URL(server.origin).port}/demo.html`);
       await demo.bringToFront();
       const demoExt = await attach(demo, extensionId);
+      // The stand-in for the API lives at a local address, and that address is
+      // what the bubble's footer would name. A reader with a Claude key sees
+      // the company's name there, so that is what the pictures show.
+      const settle = demoExt.settled;
+      demoExt.settled = async (...args) => {
+        const state = await settle(...args);
+        await demoExt.evaluate(`(() => {
+          const el = globalThis.__linkpeek?.bubble?.engineEl;
+          if (el && !el.hidden) el.textContent = 'AI provided by Anthropic';
+        })()`);
+        return state;
+      };
       const rest = async () => {
         await demo.mouse.move(60, 770);
         await sleep(300);
@@ -823,12 +832,229 @@ try {
     await sleep(150);
   });
 
-  await step('without an API key the bubble points to settings', async () => {
-    await configure({ local: { apiKey: '' } });
+  await step('"Your key" with no key saved: the bubble points to settings', async () => {
+    await configure({ local: { apiKey: '' }, sync: { mode: 'key' } });
     await peek(page, '#article');
     const state = await ext.settled();
-    assert.match(state.error, /Add your Claude or OpenAI API key/);
+    assert.equal(state.error, 'Add your Claude or OpenAI API key in settings to start peeking, or switch to Keyless there.');
     assert.deepEqual(state.buttons, ['Open settings']);
+    assert.equal(state.engine, '');
+    await page.keyboard.press('Escape');
+  });
+
+  await step('"Keyless" in a browser that cannot run it: the bubble says so and points to "Your key"', async () => {
+    await configure({ sync: { mode: 'keyless' } });
+    await peek(page, '#article');
+    const state = await ext.settled();
+    assert.match(state.error, /^Keyless cannot run on this computer: Chrome's built-in AI is not available here\. Choose “Your key”/);
+    assert.deepEqual(state.buttons, ['Open settings']);
+    await page.keyboard.press('Escape');
+  });
+
+  // ── Keyless: Chrome's built-in AI ────────────────────────────────────
+  // (Keyless stays the chosen mode for the steps below.)
+  // The model lives in the extension's hidden page. The stand-in is put there
+  // from another extension page, which can reach that window directly.
+  const hiddenPage = `chrome.extension.getViews().find((view) => view.location.pathname.includes('offscreen'))`;
+  const fakeModel = (config = {}) => admin.evaluate(`(${FAKE_MODEL})(${hiddenPage}, ${JSON.stringify(config)})`);
+  const fake = () => admin.evaluate(`JSON.parse(JSON.stringify(${hiddenPage}.__fakeModel))`);
+  const setFake = (patch) => admin.evaluate(`void Object.assign(${hiddenPage}.__fakeModel, ${JSON.stringify(patch)})`);
+  const ask = async (question) => {
+    const { input } = await ext.bubble();
+    await page.mouse.click(input.x, input.y);
+    await page.keyboard.type(question);
+    await page.keyboard.press('Enter');
+  };
+
+  await step('Keyless, model not downloaded yet: the first X+click starts it, shows progress, then the summary', async () => {
+    await fakeModel({ state: 'downloadable' });
+    await peek(page, '#article'); // a real click: the gesture Chrome asks for
+    const waiting = await waitFor(async () => {
+      const state = await ext.bubble();
+      return /Getting Keyless ready: Chrome is downloading its AI model \(about 4 GB, once\)\. \d+%\./.test(state?.status || '') ? state : null;
+    }, { what: 'download progress in the bubble' });
+    assert.equal(waiting.error, '');
+    const state = await ext.settled();
+    assert.equal(state.error, '', 'no detour through the settings');
+    assert.match(state.text, /summarized on this device/);
+    const model = await fake();
+    assert.equal(model.state, 'available');
+    assert.ok(model.created >= 1);
+    await page.keyboard.press('Escape');
+  });
+
+  await step('Keyless, opened without a click of its own (context menu): one button in the bubble turns it on', async () => {
+    await setFake({ state: 'downloadable', created: 0 }); // as if Chrome had removed the model again
+    await clearCache();
+    await worker.evaluate(async ({ origin, url }) => {
+      const [tab] = await chrome.tabs.query({ url: `${origin}/*` });
+      await chrome.tabs.sendMessage(tab.id, { type: 'linkpeek:open', url }, { frameId: 0 });
+    }, { origin: server.origin, url: `${server.origin}/article.html` });
+    let state = await ext.settled();
+    assert.equal(state.error, "One step left: Keyless needs Chrome's AI model, a free one-time download of about 4 GB.");
+    assert.deepEqual(state.buttons, ['Turn on Keyless', 'Open settings', 'Try again']);
+    assert.equal((await fake()).created, 0, 'nothing is downloaded behind the reader\'s back');
+
+    await page.mouse.click(state.buttonAt['Turn on Keyless'].x, state.buttonAt['Turn on Keyless'].y);
+    state = await ext.settled();
+    assert.equal(state.error, '');
+    assert.match(state.text, /summarized on this device/);
+    assert.equal((await fake()).state, 'available');
+    await page.keyboard.press('Escape');
+  });
+
+  await step("Keyless: Chrome's built-in AI summarizes on this computer, in the same shape as with a key", async () => {
+    await setFake({ state: 'available', prompts: [], ratings: [] });
+    await worker.evaluate(() => chrome.storage.session.remove('ratings')); // ratings from earlier steps
+    const sent = server.requests.length;
+    const rated = server.reputationRequests.length;
+    await peek(page, '#article');
+    const state = await ext.settled();
+    assert.equal(state.error, '');
+    assert.match(state.text, /TL;DR: How a sourdough starter actually works, summarized on this device\./);
+    assert.equal((state.html.match(/<li>/g) || []).length, 2, 'the Markdown is rendered as usual');
+    assert.ok(!state.text.includes('summary>'), "the model's own wrapper tag is not shown");
+    assert.equal(state.engine, 'AI running on this device', 'the footer says who answered');
+    assert.match(state.html, /<strong><em class="lp-tldr">TL;DR:<\/em><\/strong>/, 'the same TL;DR opening as a summary made with a key');
+    assert.equal(state.credit, 'Author: Mara Lindqvist, October 3, 2026', 'the header (author, date, reading time) needs no model');
+    assert.match(state.sub, /^127\.0\.0\.1 · \d+ min read$/);
+    assert.equal(server.requests.length, sent, 'nothing was sent to an AI service');
+    assert.equal(server.reputationRequests.length, rated);
+
+    // The reputation meter is there too, rated on this computer, after the summary.
+    const { reputation } = await waitFor(async () => {
+      const now = await ext.bubble();
+      return now?.reputation ? now : null;
+    }, { what: 'the on-device source rating' });
+    assert.equal(reputation.label, 'High');
+    assert.equal(reputation.bars, 4);
+    assert.match(reputation.aria, /Why: An established food magazine with editorial standards\. Decided by Chrome’s small on-device AI .* A rough estimate, not a verified rating\.$/);
+    const { ratings } = await fake();
+    assert.equal(ratings.length, 1);
+    assert.equal(ratings[0].duringAnswer, false, 'the rating waited for the summary');
+    assert.ok(ratings[0].input[0].content.includes('<author>Mara Lindqvist</author>'), 'who published the page');
+    assert.ok(!ratings[0].input[0].content.includes('A sourdough starter is not an ingredient'), 'and nothing of what it says');
+    assert.equal(server.reputationRequests.length, rated, 'no rating request left this computer either');
+
+    const { prompts } = await fake();
+    assert.equal(prompts.length, 1);
+    assert.match(prompts[0].system, /^You are LinkPeek\. The reader has not opened a web page/);
+    assert.ok(prompts[0].system.includes('**TL;DR:** one sentence'), 'the set shape');
+    assert.ok(!prompts[0].system.includes('Keep it under 150 words'), "the reader's own format prompt is for their key");
+    assert.ok(prompts[0].system.includes('Write in English.'));
+    assert.deepEqual(prompts[0].languages, ['en']);
+    const [{ role, content }] = prompts[0].input;
+    assert.equal(role, 'user');
+    assert.ok(content.includes('A sourdough starter is not an ingredient'), 'the page text');
+    assert.ok(!content.includes('NAV_NOISE'), 'cleaned the same way as for any other model');
+    assert.ok(content.endsWith('Summarize this page for me, following my preferred format.'));
+  });
+
+  await step('Keyless: a source the on-device model only guesses at is shown as Unknown, not as its guess', async () => {
+    await page.keyboard.press('Escape');
+    await worker.evaluate(async ({ origin, url }) => {
+      const [tab] = await chrome.tabs.query({ url: `${origin}/*` });
+      await chrome.tabs.sendMessage(tab.id, { type: 'linkpeek:open', url }, { frameId: 0 });
+    }, { origin: server.origin, url: `${server.origin}/passkeys.html` });
+    const state = await ext.settled();
+    assert.equal(state.error, '');
+    const { reputation } = await waitFor(async () => {
+      const now = await ext.bubble();
+      return now?.reputation ? now : null;
+    }, { what: 'the on-device source rating' });
+    const { ratings } = await fake();
+    assert.ok(ratings.at(-1).input[0].content.includes('<publisher>The Byte Review</publisher>'));
+    assert.equal(reputation.label, 'Unknown', 'the model said 3 "Mixed" while admitting it does not know the source');
+    assert.equal(reputation.bars, 0);
+    await page.keyboard.press('Escape');
+    // Back to the article, for the steps that follow.
+    await peek(page, '#article', { keepCache: true });
+    await ext.settled();
+  });
+
+  await step('a follow-up question is answered on this computer too', async () => {
+    await ask('How often should I feed it?');
+    const state = await ext.settled(3);
+    assert.equal(state.error, '');
+    assert.match(state.text, /On this device: How often should I feed it\?$/);
+    const { prompts } = await fake();
+    assert.deepEqual(prompts.at(-1).input.map((message) => message.role), ['user', 'assistant', 'user']);
+    assert.match(prompts.at(-1).input[1].content, /summarized on this device/, 'the summary is part of the conversation');
+    await page.keyboard.press('Escape');
+  });
+
+  await step('the second peek at the same page uses the saved on-device summary', async () => {
+    const { prompts } = await fake();
+    await peek(page, '#article', { keepCache: true });
+    const state = await ext.settled();
+    assert.match(state.notes.join(' '), /^Saved summary from /);
+    assert.equal(state.engine, 'AI running on this device');
+    assert.equal((await fake()).prompts.length, prompts.length, 'the model was not asked again');
+    await page.keyboard.press('Escape');
+  });
+
+  await step('a page too long for the built-in model is cut, and the bubble says so', async () => {
+    // A context window some 40 tokens too small for this page (the stand-in
+    // counts four characters as a token; 1,080 tokens are kept for the answer).
+    const [seen] = (await fake()).prompts;
+    await setFake({ window: Math.ceil(seen.system.length / 4) + Math.ceil(seen.input[0].content.length / 4) + 1080 - 40 });
+    await peek(page, '#article');
+    const state = await ext.settled();
+    await setFake({ window: 9216 });
+    assert.equal(state.error, '');
+    assert.match(state.notes.join(' '), /^Long page: Keyless read about the first \d+ words\. With your own key, LinkPeek reads much longer pages\.$/);
+    const { content } = (await fake()).prompts.at(-1).input[0];
+    assert.ok(content.includes('Only its first part is included'), 'the model is told too');
+    assert.ok(content.includes('A sourdough starter is not an ingredient'), 'the beginning is kept');
+    assert.ok(!content.includes('starter : flour : water'), 'the end is what is dropped');
+    await page.keyboard.press('Escape');
+  });
+
+  await step('Stop reaches the on-device model, and what arrived is kept', async () => {
+    await setFake({ hang: true });
+    await peek(page, '#article');
+    const partial = await waitFor(async () => {
+      const state = await ext.bubble();
+      return state?.busy && state.text.includes('TL;DR') ? state : null;
+    }, { what: 'the answer to start' });
+    await page.mouse.click(partial.send.x, partial.send.y);
+    const state = await ext.settled();
+    await setFake({ hang: false });
+    assert.match(state.text, /Stopped\.$/);
+    await waitFor(async () => (await fake()).aborted === 1, { what: 'the model to be told to stop' });
+    await page.keyboard.press('Escape');
+  });
+
+  await step('a PDF is beyond Keyless: the bubble says so, with a way forward', async () => {
+    const { prompts } = await fake();
+    await peek(page, '#pdf');
+    const state = await ext.settled();
+    assert.equal(state.error, 'Keyless cannot read PDFs. Switch to “Your key” in settings to peek at PDFs.');
+    assert.deepEqual(state.buttons, ['Open settings']);
+    assert.equal((await fake()).prompts.length, prompts.length);
+    await page.keyboard.press('Escape');
+  });
+
+  await step('the choice is the reader\'s: a saved key does not switch Keyless off, and "Your key" uses the key', async () => {
+    await configure({ local: anthropic }); // a key is saved; the mode is still Keyless
+    const sent = server.requests.length;
+    const rated = server.reputationRequests.length;
+    await peek(page, '#article');
+    let state = await ext.settled();
+    assert.match(state.text, /summarized on this device/);
+    assert.equal(state.engine, 'AI running on this device');
+    assert.equal(server.requests.length, sent, 'the key is there, and is not used');
+    assert.equal(server.reputationRequests.length, rated, 'not for a reputation rating either');
+    await page.keyboard.press('Escape');
+
+    await configure({ sync: { mode: 'key' } });
+    const { prompts } = await fake();
+    await peek(page, '#article');
+    state = await ext.settled();
+    assert.match(state.text, /TL;DR: A sourdough starter is a stable culture/, 'the summary comes from Claude');
+    assert.equal(state.engine, viaMock);
+    assert.equal(server.requests.length, sent + 1);
+    assert.equal((await fake()).prompts.length, prompts.length, 'and the built-in model is left alone');
     await page.keyboard.press('Escape');
   });
 
@@ -844,8 +1070,10 @@ try {
   });
 
   await step('settings page: key check, explicit Save for the format, visible confirmations', async () => {
-    await configure({ local: anthropic, sync: { format: 'placeholder' } });
+    await configure({ local: anthropic, sync: { format: 'placeholder', mode: 'key' } });
     const options = await context.newPage();
+    // The screenshot shows the settings as they look in Chrome proper.
+    if (SHOTS) await options.addInitScript(`(${FAKE_MODEL})(globalThis, {})`);
     await options.goto(optionsUrl);
     const stored = () => worker.evaluate(() => chrome.storage.sync.get(null));
 
@@ -973,12 +1201,225 @@ try {
     await options.close();
   });
 
+  const storedPrefs = () => worker.evaluate(() => chrome.storage.sync.get(null));
+  const savedKey = () =>
+    admin.evaluate(async () => {
+      const { loadSettings } = await import(chrome.runtime.getURL('src/lib/settings.js'));
+      return (await loadSettings()).apiKey;
+    });
+  const chosen = (options) =>
+    options.$$eval('#modes .mode', (tiles) => tiles.filter((tile) => tile.getAttribute('aria-checked') === 'true').map((tile) => tile.dataset.mode));
+
+  await step('settings: two choices, Keyless and Your key, each saying what it can and cannot do', async () => {
+    await configure({ local: anthropic, sync: { mode: 'key' } });
+    const options = await context.newPage();
+    await options.goto(optionsUrl);
+    const tiles = await options.$$eval('#modes .mode', (els) => els.map((el) => el.innerText.replace(/\s+/g, ' ')));
+    assert.equal(tiles.length, 2);
+    assert.match(tiles[0], /^Keyless free Chrome's built-in AI, on this computer\./);
+    assert.match(tiles[0], /Short summaries in one set format: a TL;DR and key points\. A few languages only: English, Spanish, Japanese, German, French\./);
+    assert.match(tiles[1], /^Your key best quality Your own Claude or OpenAI key\./);
+    assert.match(tiles[1], /Any format you describe, however long or detailed\. Almost any language\./);
+
+    // Your key is chosen: its panel is shown, Keyless's is not.
+    assert.deepEqual(await chosen(options), ['key']);
+    assert.equal(await options.isVisible('#api-key'), true);
+    assert.equal(await options.isHidden('#builtin-status'), true);
+    assert.equal(await options.isVisible('#format'), true, 'the Summary format box belongs to Your key');
+
+    // Choosing Keyless here, where the browser cannot run it: said plainly, nothing to click.
+    await options.click('#modes .mode[data-mode="keyless"]');
+    await options.waitForSelector('#builtin-status[data-state="unsupported"]');
+    assert.deepEqual(await chosen(options), ['keyless']);
+    assert.match(await options.textContent('#builtin-status'), /^Keyless cannot run in this browser\. It needs Chrome 138 or newer on a computer\. Choose “Your key” instead\.$/);
+    assert.equal(await options.isHidden('#builtin-on'), true);
+    assert.equal(await options.isHidden('#api-key'), true);
+    assert.equal(await options.isHidden('#format-card'), true, 'Keyless has one set format: no Summary format box');
+    assert.equal(await options.isVisible('#themes'), true, 'the rest of the settings stay');
+    await waitFor(async () => (await storedPrefs()).mode === 'keyless', { what: 'the choice to be saved' });
+    assert.equal(await savedKey(), 'sk-ant-test-key', 'switching to Keyless keeps the saved key');
+
+    await options.click('#modes .mode[data-mode="key"]');
+    assert.equal(await options.isVisible('#api-key'), true);
+    assert.equal(await options.isVisible('#format-card'), true, 'and back again with Your key');
+    assert.equal(await options.inputValue('#api-key'), 'sk-ant-test-key');
+    await waitFor(async () => (await storedPrefs()).mode === 'key', { what: 'the choice to be saved' });
+    await options.close();
+  });
+
+  await step('settings: choosing Keyless starts the model download at once, with progress', async () => {
+    const options = await context.newPage();
+    await options.addInitScript(`(${FAKE_MODEL})(globalThis, { state: 'downloadable' })`);
+    await options.goto(optionsUrl);
+    await options.click('#modes .mode[data-mode="keyless"]'); // the click Chrome asks for
+    await waitFor(async () => /Downloading Chrome’s AI model… 42%/.test(await options.textContent('#builtin-status')), { what: 'download progress' });
+    assert.equal(await options.isHidden('#builtin-on'), true, 'nothing left to click while it downloads');
+    assert.equal(await options.evaluate(() => document.getElementById('builtin-progress').value), 0.42);
+    await options.waitForSelector('#builtin-status.ok');
+    assert.equal(await options.textContent('#builtin-status'), '✓ Ready on this computer. Hold X and click any link.');
+    assert.equal(await options.isHidden('#builtin-on'), true);
+    assert.equal(await options.isHidden('#builtin-progress'), true);
+    await waitFor(async () => (await storedPrefs()).mode === 'keyless', { what: 'the choice to be saved' });
+    await options.close();
+  });
+
+  await step('settings, right after installing: the download waits for a click (Chrome insists), then takes the first one', async () => {
+    await configure({ local: { apiKey: '' }, sync: { mode: 'keyless' } });
+    const fresh = async () => {
+      const options = await context.newPage();
+      await options.addInitScript(`(${FAKE_MODEL})(globalThis, { state: 'downloadable' })`);
+      await options.goto(optionsUrl);
+      await options.waitForSelector('#builtin-status[data-state="downloadable"]');
+      return options;
+    };
+    const created = (options) => options.evaluate(() => globalThis.__fakeModel.created);
+
+    // Nothing has been clicked: nothing is downloaded, and the page says what will happen.
+    let options = await fresh();
+    await sleep(600);
+    assert.equal(await created(options), 0);
+    assert.match(await options.textContent('#builtin-status'), /^One step left: Chrome downloads its AI model once \(about 4 GB\)\. It starts with your first click on this page, or with your first peek\./);
+    assert.equal(await options.textContent('#builtin-on'), 'Turn on');
+    // Any click will do. Here: on the page's heading, not on the button.
+    await options.click('h1');
+    await options.waitForSelector('#builtin-status.ok');
+    assert.equal(await created(options), 1);
+    await options.close();
+
+    // Except the click that says "not Keyless".
+    options = await fresh();
+    await options.click('#modes .mode[data-mode="key"]');
+    await sleep(600);
+    assert.equal(await created(options), 0, 'choosing Your key downloads nothing');
+    assert.equal(await options.evaluate(() => globalThis.__fakeModel.state), 'downloadable');
+    await options.close();
+  });
+
+  await step('settings: the first visit starts from what this computer can do, then never chooses again', async () => {
+    const firstVisit = async ({ key, model }) => {
+      await configure({ local: { apiKey: key }, sync: { mode: '' } });
+      const options = await context.newPage();
+      if (model) await options.addInitScript(`(${FAKE_MODEL})(globalThis, { state: '${model}' })`);
+      await options.goto(optionsUrl);
+      await waitFor(async () => (await storedPrefs()).mode, { what: 'a starting choice' });
+      const result = { stored: (await storedPrefs()).mode, shown: await chosen(options) };
+      await options.close();
+      return result;
+    };
+    assert.deepEqual(await firstVisit({ key: '', model: 'available' }), { stored: 'keyless', shown: ['keyless'] }, 'a computer that can: Keyless');
+    assert.deepEqual(await firstVisit({ key: '', model: 'downloadable' }), { stored: 'keyless', shown: ['keyless'] });
+    assert.deepEqual(await firstVisit({ key: '', model: '' }), { stored: 'key', shown: ['key'] }, 'a computer that cannot: Your key');
+    assert.deepEqual(await firstVisit({ key: 'sk-ant-test-key', model: 'available' }), { stored: 'key', shown: ['key'] }, 'someone who already has a key keeps using it');
+
+    // Once chosen, pasting or removing a key does not move the choice.
+    await configure({ local: { apiKey: '' }, sync: { mode: 'keyless' } });
+    const options = await context.newPage();
+    await options.addInitScript(`(${FAKE_MODEL})(globalThis, {})`);
+    await options.goto(optionsUrl);
+    await options.waitForSelector('#builtin-status.ok');
+    await configure({ local: { apiKey: 'sk-ant-test-key' } });
+    await options.reload();
+    await options.waitForSelector('#builtin-status.ok');
+    assert.deepEqual(await chosen(options), ['keyless']);
+    assert.equal((await storedPrefs()).mode, 'keyless');
+    await options.close();
+    await configure({ local: anthropic, sync: { mode: 'key' } });
+  });
+
   await step('toolbar popup shows the same settings, compact', async () => {
     const popup = await context.newPage();
     await popup.goto(`${optionsUrl}?popup=1`);
     assert.equal(await popup.evaluate(() => document.documentElement.classList.contains('popup')), true);
     assert.equal(await popup.evaluate(() => getComputedStyle(document.body).width), '400px');
     await popup.close();
+  });
+
+  // ── Embedded frames ──────────────────────────────────────────────────
+  const framed = await context.newPage();
+  await framed.goto(`${server.origin}/frames.html`);
+  await framed.bringToFront();
+  const frameOf = async (id) => (await framed.$(`#${id}`)).contentFrame();
+  const topExt = await attach(framed, extensionId);
+  // Hold X with the focus in `holder` (the page or a frame), click in `where`.
+  const peekAcross = async (holder, focusOn, where, selector) => {
+    await holder.click(focusOn); // the key press will land where the focus is
+    await framed.keyboard.down('x');
+    await sleep(250); // a person holds the key for at least this long before clicking
+    await where.click(selector);
+    await framed.keyboard.up('x');
+  };
+
+  await step('a link inside an embedded frame: X held in the page, click in the frame, bubble in the frame', async () => {
+    const same = await frameOf('same');
+    const sameExt = await attach(framed, extensionId, same);
+    const address = same.url();
+    await peekAcross(framed, 'h1', same, '#article');
+    const state = await sameExt.settled();
+    assert.equal(state.error, '');
+    assert.match(state.text, /TL;DR: A sourdough starter/);
+    assert.equal(same.url(), address, 'the frame did not navigate');
+    assert.equal(await topExt.bubble(), null, 'the bubble is where the link is, not in the page around it');
+    assert.equal(context.pages().length, tabs + 1, 'and no tab was opened');
+  });
+
+  await step('a frame from another site works the same, and there is only ever one bubble on the page', async () => {
+    const cross = await frameOf('cross');
+    assert.match(cross.url(), /^http:\/\/embedded\.example:/);
+    const crossExt = await attach(framed, extensionId, cross);
+    const sameExt = await attach(framed, extensionId, await frameOf('same'));
+    assert.ok(await sameExt.bubble(), 'the bubble from the step before is still open');
+    await peekAcross(framed, 'h1', cross, '#article');
+    const state = await crossExt.settled();
+    assert.equal(state.error, '');
+    assert.match(state.text, /TL;DR: A sourdough starter/);
+    await waitFor(async () => (await sameExt.bubble()) === null, { what: 'the other frame to close its bubble' });
+  });
+
+  await step('a sandboxed frame whose link opens a new tab (an artifact page): X+click peeks instead', async () => {
+    const boxed = await frameOf('boxed');
+    const boxedExt = await attach(framed, extensionId, boxed);
+    await peekAcross(framed, 'h1', boxed, '#out');
+    const state = await boxedExt.settled();
+    assert.equal(state.error, '');
+    assert.match(state.text, /TL;DR: A sourdough starter/);
+    assert.equal(context.pages().length, tabs + 1, 'the link did not open its new tab');
+    await framed.keyboard.press('Escape');
+  });
+
+  await step('the other way round: X held inside a frame, click on a link in the page', async () => {
+    const same = await frameOf('same');
+    await peekAcross(same, 'h1', framed, '#top-link');
+    const state = await topExt.settled();
+    assert.equal(state.error, '');
+    assert.match(state.text, /TL;DR: A sourdough starter/);
+    assert.equal(framed.url(), `${server.origin}/frames.html`);
+    await framed.keyboard.press('Escape');
+    await waitFor(async () => (await topExt.bubble()) === null, { what: 'the bubble to close' });
+  });
+
+  await step('a frame too small for a bubble hands it to the page around it', async () => {
+    const small = await frameOf('small');
+    const smallExt = await attach(framed, extensionId, small);
+    await peekAcross(framed, 'h1', small, '#article');
+    const state = await topExt.settled();
+    assert.equal(state.error, '');
+    assert.equal(state.title, 'How a sourdough starter actually works');
+    assert.equal(await smallExt.bubble(), null);
+    await framed.keyboard.press('Escape');
+  });
+
+  await step('once the key is released, clicks inside frames are ordinary clicks again', async () => {
+    const same = await frameOf('same');
+    const sameExt = await attach(framed, extensionId, same);
+    await framed.click('h1');
+    await framed.keyboard.press('x'); // down and up, in the page
+    await sleep(250);
+    await same.click('#hash'); // a same-page anchor: harmless to follow
+    await sleep(400);
+    assert.equal(await sameExt.bubble(), null);
+    assert.match(same.url(), /#top$/);
+    await framed.close();
+    await page.bringToFront();
   });
 
   await step('works on a local file:// page too', async () => {

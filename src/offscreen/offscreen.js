@@ -1,5 +1,5 @@
 // Service workers have no DOM. This hidden extension page does two DOM jobs for
-// the service worker:
+// the service worker (a third, Chrome's built-in AI, lives in builtin-host.js):
 //   extract  parse fetched HTML into readable text. DOMParser documents are
 //            inert: no scripts run, nothing is loaded.
 //   icon     decode a site's icon (PNG, ICO, SVG…) into plain pixels, which

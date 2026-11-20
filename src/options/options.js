@@ -5,6 +5,12 @@
 //     unsaved edits and confirms with a green "✓ Saved".
 //   - Everything else (key, model, shortcut, advanced): saved as soon as it
 //     changes, confirmed by a green "✓ Saved" in the corner of that card.
+//
+// The first card is the choice of who writes the summaries: "Keyless"
+// (Chrome's built-in AI, on this computer) or "Your key" (Claude or OpenAI).
+// The choice is the reader's: a saved key never switches the mode by itself.
+// This page is also where the built-in model's one-time download is started,
+// because Chrome only allows that from a click in a visible page.
 
 import {
   DEFAULT_FORMAT,
@@ -14,10 +20,12 @@ import {
   THEMES,
   loadSettings,
   resolveBaseUrl,
-  resolveProvider,
+  resolveKeyProvider,
+  resolveMode,
   saveSettings,
 } from '../lib/settings.js';
 import { listModels } from '../lib/providers.js';
+import { builtinState, sessionOptions } from '../lib/builtin-ai.js';
 import { clearSummaries, countSummaries } from '../lib/summary-cache.js';
 
 const $ = (id) => document.getElementById(id);
@@ -27,7 +35,7 @@ const NOT_CHAT = /embed|whisper|tts|audio|speech|image|dall-e|sora|video|moderat
 const IS_MAC = /mac/i.test(navigator.userAgentData?.platform || navigator.platform || '');
 // Which card confirms a change to which setting.
 const CARD_OF = {
-  apiKey: 'key', models: 'key', trigger: 'shortcut',
+  apiKey: 'key', models: 'key', mode: 'key', trigger: 'shortcut',
   provider: 'advanced', baseUrl: 'advanced', reputation: 'advanced', theme: 'design',
 };
 const TRIGGER_HELP =
@@ -44,6 +52,10 @@ let savedFormat = ''; // the format text as last saved
 let formatTimer = 0;
 const flashTimers = {};
 const fetchedModels = { anthropic: [], openai: [] };
+let builtin = 'checking'; // then one of builtinState()'s answers
+let builtinBusy = false; // a model download started from this page is running
+let builtinNote = ''; // progress or an error, shown instead of the usual text
+let builtinTimer = 0;
 
 if (new URLSearchParams(location.search).has('popup')) document.documentElement.classList.add('popup');
 
@@ -105,7 +117,7 @@ function scheduleKeyCheck(delay = 700) {
 
 async function checkKey() {
   const run = ++checkRun;
-  const provider = resolveProvider(settings);
+  const provider = resolveKeyProvider(settings);
   const { label } = PROVIDERS[provider];
   try {
     const models = await listModels({
@@ -125,9 +137,9 @@ async function checkKey() {
 }
 
 function renderModels() {
-  const provider = resolveProvider(settings);
+  const provider = resolveKeyProvider(settings);
   const info = PROVIDERS[provider];
-  const current = settings.models[provider];
+  const current = settings.models[provider] || '';
   const select = $('model');
   const option = (value, text) => {
     const el = document.createElement('option');
@@ -161,8 +173,132 @@ function renderModels() {
 }
 
 function setModel(value, options) {
-  const provider = resolveProvider(settings);
+  const provider = resolveKeyProvider(settings);
   save({ models: { ...settings.models, [provider]: value.trim() } }, options);
+}
+
+// ── Keyless or your key ──────────────────────────────────────────────────
+
+function renderMode() {
+  const mode = resolveMode(settings);
+  for (const tile of document.querySelectorAll('#modes .mode')) {
+    tile.setAttribute('aria-checked', String(tile.dataset.mode === mode));
+  }
+  $('keyless-panel').hidden = mode !== 'keyless';
+  $('key-panel').hidden = mode !== 'key';
+  $('format-card').hidden = mode !== 'key'; // Keyless has one set format, nothing to describe
+  renderBuiltin();
+}
+
+function chooseMode(mode) {
+  if (mode === resolveMode(settings) && settings.mode) return;
+  save({ mode }, { now: true });
+  renderMode();
+  if (mode === 'key') {
+    scheduleKeyCheck(0);
+    if (!settings.apiKey) $('api-key').focus();
+  } else if (builtin === 'downloadable') {
+    turnOnBuiltin({ quiet: true }); // choosing Keyless is the click Chrome asks for
+  } else {
+    checkBuiltin();
+  }
+}
+
+// ── Chrome's built-in AI (Keyless) ───────────────────────────────────────
+
+function renderBuiltin() {
+  let text = '';
+  let kind = '';
+  let action = '';
+  if (builtin === 'checking') {
+    text = 'Checking this computer…';
+  } else if (builtin === 'available') {
+    kind = 'ok';
+    text = `✓ Ready on this computer. Hold ${settings.trigger.label} and click any link.`;
+  } else if (builtin === 'downloadable') {
+    text = 'One step left: Chrome downloads its AI model once (about 4 GB). It starts with your first click on this page, or with your first peek. After that Keyless also works offline.';
+    action = 'Turn on';
+  } else if (builtin === 'downloading') {
+    text = 'Chrome is downloading its AI model. This can take a few minutes.';
+    action = 'Show progress';
+  } else if (builtin === 'unavailable') {
+    kind = 'bad';
+    text = 'Keyless cannot run on this computer. Chrome’s built-in AI needs about 22 GB of free disk space, and 16 GB of memory or a recent graphics card. Choose “Your key” instead.';
+  } else {
+    kind = 'bad';
+    text = 'Keyless cannot run in this browser. It needs Chrome 138 or newer on a computer. Choose “Your key” instead.';
+  }
+  const status = $('builtin-status');
+  status.textContent = builtinNote || text;
+  status.className = `status ${builtinNote ? '' : kind}`.trim();
+  status.dataset.state = builtin;
+  $('builtin-on').hidden = !action || builtinBusy;
+  $('builtin-on').textContent = action;
+  $('builtin-progress').hidden = !builtinBusy;
+}
+
+async function checkBuiltin() {
+  clearTimeout(builtinTimer);
+  if (builtinBusy) return;
+  builtin = await builtinState();
+  if (builtinBusy) return;
+  // First visit: nothing chosen yet. Start from what this computer can do,
+  // and from then on the choice is only ever changed by the reader.
+  if (!settings.mode) {
+    const usable = ['available', 'downloadable', 'downloading'].includes(builtin);
+    settings.mode = settings.apiKey || !usable ? 'key' : 'keyless';
+    saveSettings({ mode: settings.mode }).catch(() => {});
+    renderMode();
+  }
+  renderBuiltin();
+  // A download started elsewhere, or by Chrome itself: keep looking.
+  if (builtin === 'downloading') builtinTimer = setTimeout(checkBuiltin, 4000);
+}
+
+// Chrome starts the model's download only inside a user gesture, so it cannot
+// begin by itself when this page opens after installing. The first click or
+// key press here is the earliest moment there is, and it is taken, unless that
+// click is the reader choosing "Your key" instead.
+function onFirstGesture(event) {
+  if (!event.isTrusted || builtinBusy || builtin !== 'downloadable' || resolveMode(settings) !== 'keyless') return;
+  if (event.target instanceof Element && event.target.closest('.mode[data-mode="key"]')) return;
+  turnOnBuiltin({ quiet: true });
+}
+
+// Creating a session is what makes Chrome fetch the model. It must happen in
+// a click handler: Chrome refuses to start the download otherwise. `quiet`
+// is for the automatic start, where a refusal is not the reader's concern.
+async function turnOnBuiltin({ quiet = false } = {}) {
+  if (builtinBusy) return;
+  builtinBusy = true;
+  builtinNote = 'Starting…';
+  const bar = $('builtin-progress');
+  bar.removeAttribute('value'); // no number yet: show it as busy
+  renderBuiltin();
+  let failure = '';
+  try {
+    const session = await globalThis.LanguageModel.create({
+      ...sessionOptions(),
+      monitor(monitor) {
+        monitor.addEventListener('downloadprogress', (event) => {
+          const done = Number(event.loaded) / (Number(event.total) || 1);
+          if (!(done >= 0)) return;
+          bar.value = Math.min(1, done);
+          builtinNote = done >= 1 ? 'Almost ready: starting the model…' : `Downloading Chrome’s AI model… ${Math.floor(done * 100)}%. You can keep browsing.`;
+          renderBuiltin();
+        });
+      },
+    });
+    session.destroy();
+  } catch (err) {
+    if (!(quiet && err?.name === 'NotAllowedError')) failure = `Could not turn it on: ${String(err?.message || err)}`;
+  }
+  builtinBusy = false;
+  builtinNote = '';
+  builtin = await builtinState();
+  if (failure && builtin !== 'available') builtinNote = failure;
+  renderBuiltin();
+  builtinNote = '';
 }
 
 // ── Summary format (explicit Save) ───────────────────────────────────────
@@ -253,6 +389,7 @@ function renderTrigger() {
   $('change-trigger').textContent = capturing ? 'Cancel' : 'Change key';
   $('reset-trigger').disabled = capturing || isDefault;
   $('trigger-help').textContent = capturing ? CAPTURE_HELP : TRIGGER_HELP;
+  renderBuiltin(); // its "ready" line names the shortcut
 }
 
 function keyLabel(event) {
@@ -318,6 +455,17 @@ async function init() {
   renderThemes();
   renderCacheCount();
   scheduleKeyCheck(0);
+  renderMode();
+  checkBuiltin();
+
+  for (const tile of document.querySelectorAll('#modes .mode')) {
+    tile.addEventListener('click', () => chooseMode(tile.dataset.mode));
+  }
+  $('builtin-on').addEventListener('click', () => turnOnBuiltin());
+  document.addEventListener('pointerdown', onFirstGesture, true);
+  document.addEventListener('keydown', onFirstGesture, true);
+  // Coming back to this page (after freeing disk space, say): look again.
+  window.addEventListener('focus', () => builtin !== 'available' && checkBuiltin());
 
   $('api-key').addEventListener('input', (event) => {
     save({ apiKey: event.target.value.trim() });

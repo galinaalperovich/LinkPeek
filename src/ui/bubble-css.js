@@ -506,7 +506,17 @@
 
 /* ── Ask ────────────────────────────────────────────────── */
 
-.lp-foot { display: flex; justify-content: flex-end; padding: 0 12px 6px; margin-top: -4px; }
+.lp-foot { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 0 12px 5px; margin-top: -5px; }
+/* Who made the answer. Deliberately the quietest text in the bubble. */
+.lp-engine {
+  margin-right: auto;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.2;
+  opacity: 0.8;
+  cursor: default;
+}
+.lp-engine[hidden] { display: none; }
 .lp-settings {
   margin: 0;
   padding: 0;
@@ -514,9 +524,9 @@
   background: none;
   color: var(--muted);
   font: inherit;
-  font-size: 10px;
+  font-size: 9px;
   line-height: 1.2;
-  opacity: 0.75;
+  opacity: 0.8;
   cursor: pointer;
 }
 .lp-settings:hover { opacity: 1; text-decoration: underline; }

@@ -1,6 +1,9 @@
 // LinkPeek content script: notices "hold the shortcut key and click a link",
 // then shows the bubble. It never sees the API key and does no networking of
 // its own. Everything goes through a port to the service worker.
+//
+// It runs in every frame of a page, embedded ones included, so links inside
+// an embedded page work like any other. See "Frames" below.
 (() => {
   'use strict';
 
@@ -14,11 +17,15 @@
   const STAGE_TEXT = {
     fetching: 'Reading the page…',
     rendering: 'Opening it in a background tab…',
+    waking: 'Waking up Chrome’s built-in AI. Only the first peek is this slow…',
     thinking: 'Summarizing…',
   };
   // Errors where trying again cannot help.
-  const NO_RETRY = new Set(['reload', 'bad-url', 'unsupported', 'not-found', 'too-large', 'no-key']);
-  const NEEDS_SETTINGS = new Set(['no-key', 'auth', 'model']);
+  const NO_RETRY = new Set(['reload', 'bad-url', 'unsupported', 'not-found', 'too-large', 'no-key', 'builtin-pdf']);
+  const NEEDS_SETTINGS = new Set(['no-key', 'auth', 'model', 'builtin-setup', 'builtin-pdf']);
+  const BUILTIN_TITLE =
+    'Keyless: made by Chrome’s built-in AI on this computer. The page was not sent to any AI service. “Your key” in settings gives longer, sharper summaries.';
+  const KEY_TITLE = 'Made with your own API key. The text of the page was sent to this provider.';
   // Index = level, as rated by the model (see lib/reputation.js).
   const REPUTATION = [
     { label: 'Unknown', tone: 'none', means: 'The AI does not know this source well enough to rate it.' },
@@ -30,6 +37,8 @@
   ];
   const REPUTATION_CAVEAT =
     'Decided by AI from what it knows about this publisher and author. An estimate, not a verified rating.';
+  const REPUTATION_CAVEAT_BUILTIN =
+    'Decided by Chrome’s small on-device AI from what it knows about this publisher and author. A rough estimate, not a verified rating.';
   const SVG_NS = 'http://www.w3.org/2000/svg';
   const ICONS = {
     close: ['M18 6 6 18', 'M6 6l12 12'],
@@ -43,11 +52,39 @@
   const THEMES = new Set(['light', 'dark', 'vision', 'paper', 'midnight']);
   const prefersDark = window.matchMedia('(prefers-color-scheme: dark)');
   let theme = 'auto'; // the reader's choice; 'auto' follows the system
+  let mode = ''; // 'keyless' | 'key', as chosen in the settings
   let trigger = DEFAULT_TRIGGER;
   let bubble = null;
   let lastContext = null; // where the context menu was last opened
   const held = new Set(); // physical keys currently down
   const listeners = [];
+
+  // ── Frames ───────────────────────────────────────────────────────────
+  // Each frame runs its own copy of this script, and a key press only reaches
+  // the frame that has the focus. Holding the shortcut key in the page and
+  // clicking a link inside an embedded frame must work all the same (and the
+  // other way round), so frames tell each other when the key goes down and up.
+  // The news travels through the service worker, so a page cannot fake it.
+  const IN_FRAME = window !== window.top;
+  const INSTANCE = Math.random().toString(36).slice(2);
+  // How long "the key is down in another frame" is believed without news. The
+  // frame holding the key repeats it more often than this while it is held.
+  const REMOTE_HOLD_MS = 1500;
+  const RETELL_MS = 400;
+  // A frame smaller than this cannot hold a bubble: the page around it shows it.
+  const MIN_FRAME_WIDTH = 340;
+  const MIN_FRAME_HEIGHT = 260;
+  let remoteHeldUntil = 0;
+  let lastTold = 0;
+
+  function tellFrames(message) {
+    if (!IN_FRAME && window.frames.length === 0) return; // a page with no frames: nobody to tell
+    try {
+      chrome.runtime.sendMessage({ type: 'linkpeek:frames', from: INSTANCE, ...message }).catch(() => {});
+    } catch {
+      // extension was reloaded
+    }
+  }
 
   const isAlive = () => {
     try {
@@ -263,7 +300,9 @@
           // extension was reloaded
         }
       });
-      this.foot = h('div', { class: 'lp-foot' }, this.settingsBtn);
+      // Who made the answer: "AI running on this device" or "AI provided by …".
+      this.engineEl = h('span', { class: 'lp-engine', hidden: true });
+      this.foot = h('div', { class: 'lp-foot' }, this.engineEl, this.settingsBtn);
 
       this.panel = h('div', { class: 'lp', role: 'dialog', 'aria-label': 'LinkPeek summary' }, this.head, this.body, this.form, this.foot);
       this.root.append(this.panel, this.tipEl);
@@ -569,17 +608,18 @@
       );
       const score = rating.level ? `${rating.level} of 5` : '';
       const why = rating.reason ? `Why: ${rating.reason}.` : '';
+      const caveat = this.onDevice ? REPUTATION_CAVEAT_BUILTIN : REPUTATION_CAVEAT;
       this.repCard = [
         h('div', { class: 'lp-tip-title' },
           h('strong', { text: `Source reputation: ${label}` }),
           score ? h('span', { text: score }) : null),
         h('div', { text: means }),
         why ? h('div', { text: why }) : null,
-        h('div', { class: 'lp-tip-foot', text: REPUTATION_CAVEAT }),
+        h('div', { class: 'lp-tip-foot', text: caveat }),
       ];
       // The same words for screen readers, which do not get the hover card.
       this.repEl.setAttribute('aria-label',
-        [`Source reputation: ${label}${score ? `, ${score}` : ''}.`, means, why, REPUTATION_CAVEAT].filter(Boolean).join(' '));
+        [`Source reputation: ${label}${score ? `, ${score}` : ''}.`, means, why, caveat].filter(Boolean).join(' '));
     }
 
     // The card is a sibling of the panel, so the panel's rounded clipping
@@ -670,9 +710,17 @@
         if (settled || this.closed) return;
         if (message.type === 'status') {
           const asking = request.type === 'ask' && message.stage === 'thinking';
-          this.setStatus(asking ? 'Thinking…' : STAGE_TEXT[message.stage] || 'Working…');
+          if (message.stage === 'downloading') {
+            const percent = message.progress >= 0 ? ` ${Math.floor(message.progress * 100)}%.` : '';
+            this.setStatus(`Getting Keyless ready: Chrome is downloading its AI model (about 4 GB, once).${percent} The summary follows by itself; you can also close this and come back.`);
+          } else this.setStatus(asking ? 'Thinking…' : STAGE_TEXT[message.stage] || 'Working…');
         } else if (message.type === 'page') {
           this.setPage(message.page);
+        } else if (message.type === 'engine') {
+          this.onDevice = Boolean(message.builtin);
+          this.engineEl.textContent = String(message.label || '');
+          this.engineEl.title = message.builtin ? BUILTIN_TITLE : KEY_TITLE;
+          this.engineEl.hidden = !message.label;
         } else if (message.type === 'reset') {
           text = '';
           this.draw(target, text, true);
@@ -687,6 +735,7 @@
             note = `The model declined to ${text.trim() ? 'continue' : 'answer'}${message.detail ? ` (${message.detail} safety filter)` : ''}.`;
           } else if (!text.trim()) note = 'The model returned an empty answer.';
           else if (message.cachedAt) note = this.cachedNote(message.cachedAt);
+          else if (message.notice) note = String(message.notice);
           finish(note);
         } else if (message.type === 'error') {
           settle();
@@ -711,6 +760,7 @@
     // `fresh` skips the saved summary and asks the model again.
     summarize(fresh = false) {
       this.setReputation(null);
+      this.engineEl.hidden = true;
       this.body.replaceChildren(this.skeleton);
       this.skeleton.hidden = false;
       this.setStatus(STAGE_TEXT.fetching);
@@ -757,8 +807,19 @@
         h('div', { class: 'lp-error-msg', text: error.message || 'Something went wrong.' }),
         error.detail ? h('div', { class: 'lp-error-detail', text: String(error.detail).slice(0, 400) }) : null,
         actions);
+      if (error.code === 'builtin-setup' && retry) {
+        // This click is the gesture Chrome asks for before it downloads its model.
+        const on = h('button', { class: 'lp-btn lp-primary', type: 'button', text: 'Turn on Keyless' });
+        on.addEventListener('click', (event) => {
+          if (!event.isTrusted) return;
+          switchOnBuiltin();
+          box.remove();
+          setTimeout(retry, 250); // give the request a moment to land first
+        });
+        actions.append(on);
+      }
       if (NEEDS_SETTINGS.has(error.code)) {
-        const settings = h('button', { class: 'lp-btn lp-primary', type: 'button', text: 'Open settings' });
+        const settings = h('button', { class: `lp-btn${error.code === 'builtin-setup' ? '' : ' lp-primary'}`, type: 'button', text: 'Open settings' });
         settings.addEventListener('click', () => {
           try {
             chrome.runtime.sendMessage({ type: 'linkpeek:open-options' }).catch(() => {});
@@ -844,9 +905,33 @@
     }
   }
 
+  // Keyless runs on Chrome's built-in model, which Chrome switches on (one
+  // download, once) only inside a user gesture. The hidden extension page that
+  // hosts the model never gets a click of its own, but a message sent during a
+  // real click carries the gesture to it. So this is called from the reader's
+  // own X+click and from the "Turn on Keyless" button. Later on it just wakes
+  // the model a moment sooner. It carries no data.
+  function switchOnBuiltin() {
+    try {
+      chrome.runtime.sendMessage({ target: 'offscreen', type: 'builtin:gesture' }).catch(() => {});
+    } catch {
+      // extension was reloaded
+    }
+  }
+
   function openBubble(options) {
+    if (IN_FRAME && (window.innerWidth < MIN_FRAME_WIDTH || window.innerHeight < MIN_FRAME_HEIGHT)) {
+      // No room in here (a small embedded widget): the top page shows the bubble.
+      try {
+        chrome.runtime.sendMessage({ type: 'linkpeek:open-top', url: options.url, linkText: options.linkText }).catch(() => {});
+      } catch {
+        // extension was reloaded
+      }
+      return;
+    }
     bubble?.close();
     bubble = new Bubble(options);
+    tellFrames({ opened: true }); // one bubble per page: the others close theirs
   }
 
   // ── Trigger: hold the key, click a link ──────────────────────────────
@@ -889,7 +974,8 @@
     if (trigger.kind === 'mod') {
       return event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
     }
-    return held.has(trigger.code) && !event.ctrlKey && !event.metaKey && !event.altKey;
+    const down = held.has(trigger.code) || Date.now() < remoteHeldUntil; // here, or in another frame
+    return down && !event.ctrlKey && !event.metaKey && !event.altKey;
   }
 
   function onClick(event) {
@@ -901,6 +987,7 @@
     if (!url) return;
     event.preventDefault();
     event.stopImmediatePropagation();
+    if (mode === 'keyless') switchOnBuiltin();
     openBubble({
       url,
       linkText: linkLabel(anchor),
@@ -914,7 +1001,14 @@
   // must not count: macOS never sends keyup for a key released while Cmd is
   // down, which would leave it "held" forever.
   function trackKey(event) {
-    if (event.isTrusted && !event.metaKey && !event.ctrlKey && !event.altKey) held.add(event.code);
+    if (!event.isTrusted || event.metaKey || event.ctrlKey || event.altKey) return;
+    held.add(event.code);
+    // Only the shortcut key is ever mentioned to other frames, and not on
+    // every repeat while it is held.
+    if (trigger.kind === 'key' && event.code === trigger.code && Date.now() - lastTold > RETELL_MS) {
+      lastTold = Date.now();
+      tellFrames({ key: 'down' });
+    }
   }
 
   function onKeyDown(event) {
@@ -938,6 +1032,11 @@
   function onKeyUp(event) {
     if (event.key === 'Meta' || event.key === 'Control') held.clear();
     else held.delete(event.code);
+    if (trigger.kind === 'key' && event.code === trigger.code) {
+      lastTold = 0;
+      remoteHeldUntil = 0;
+      tellFrames({ key: 'up' });
+    }
     if (bubble?.owns(event)) bubble.handleKey(event);
   }
 
@@ -963,13 +1062,25 @@
 
   // "Peek at this link" in the context menu.
   function onMessage(message) {
+    if (message?.type === 'linkpeek:frames') {
+      if (message.from === INSTANCE) return; // our own news, coming back round
+      if (message.key === 'down') remoteHeldUntil = Date.now() + REMOTE_HOLD_MS;
+      else if (message.key === 'up') {
+        // Released while another frame had the focus: this frame saw the key
+        // go down but never come up. It is up now, here as well.
+        remoteHeldUntil = 0;
+        lastTold = 0;
+        if (trigger.kind === 'key') held.delete(trigger.code);
+      } else if (message.opened) bubble?.close();
+      return;
+    }
     if (message?.type !== 'linkpeek:open' || typeof message.url !== 'string') return;
     const recent = lastContext && Date.now() - lastContext.time < 60_000 ? lastContext : null;
     // Only mark the link that was right-clicked if it is the one being opened.
     const anchor = recent?.anchor && linkUrl(recent.anchor) === message.url ? recent.anchor : null;
     openBubble({
       url: message.url,
-      linkText: recent?.label || '',
+      linkText: recent?.label || String(message.linkText || ''),
       point: recent?.point,
       rect: anchor?.getBoundingClientRect(),
       anchor,
@@ -980,6 +1091,7 @@
     if (area !== 'sync') return;
     if (changes.trigger) setTrigger(changes.trigger.newValue);
     if (changes.theme) setTheme(changes.theme.newValue);
+    if (changes.mode) mode = changes.mode.newValue || '';
   }
 
   function setTheme(value) {
@@ -1025,9 +1137,10 @@
   listen(prefersDark, 'change', () => bubble?.applyTheme(), false); // "Auto" follows the system live
 
   try {
-    chrome.storage.sync.get({ trigger: DEFAULT_TRIGGER, theme: 'auto' }).then((stored) => {
+    chrome.storage.sync.get({ trigger: DEFAULT_TRIGGER, theme: 'auto', mode: '' }).then((stored) => {
       setTrigger(stored.trigger);
       setTheme(stored.theme);
+      mode = stored.mode || '';
     }, () => {});
     chrome.storage.onChanged.addListener(onStorageChanged);
     chrome.runtime.onMessage.addListener(onMessage);

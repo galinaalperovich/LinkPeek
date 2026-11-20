@@ -2,16 +2,18 @@
 
 _Last updated: November 19, 2026_
 
-LinkPeek has no server, no account, no analytics and no telemetry. It talks to exactly two kinds of hosts: the page you ask it to read, and the AI provider whose key you entered.
+LinkPeek has no server, no account, no analytics and no telemetry. It talks to at most two kinds of hosts: the page you ask it to read, and, only in "Your key" mode, the AI provider your API key belongs to.
+
+You choose the mode in the settings. **In Keyless mode, the page you peek at is not sent to anyone.** The summary and the answers are made by Chrome's built-in AI, a model that runs on your own computer. Bubbles made this way say "AI running on this device"; bubbles made with your key say "AI provided by" and the provider's name. A saved API key is not used in Keyless mode.
 
 ## What is stored, and where
 
 | Data | Where | Leaves your device? |
 | --- | --- | --- |
 | API key, optional API base URL | The extension's own IndexedDB database on this device | Only as the credential on requests to your AI provider |
-| Summary format, model choice, shortcut key | `chrome.storage.sync` | Synced by Chrome to your own signed-in browsers, if you use Chrome sync |
+| Keyless or Your key, summary format, model choice, design, shortcut key | `chrome.storage.sync` | Synced by Chrome to your own signed-in browsers, if you use Chrome sync |
 | Finished summaries | The extension's own IndexedDB database on this device, for up to 30 days (at most 300). Each is stored under a hash of the page content, not under its address or text. Nothing is saved from incognito windows. | No. Clear them any time under Settings, Advanced |
-| Pages you peek at, your questions, the answers | Memory only, while the bubble is open | Sent to your AI provider (see below); never written to disk by LinkPeek |
+| Pages you peek at, your questions, the answers | Memory only, while the bubble is open | In "Your key" mode: sent to your AI provider (see below). In Keyless mode: no. Never written to disk by LinkPeek |
 
 The API key is deliberately kept out of `chrome.storage`. Scripts that an extension runs inside web pages can read `chrome.storage`; they cannot open the extension's IndexedDB database. The key is used only by the extension's service worker.
 
@@ -22,14 +24,15 @@ Nothing is sent until you trigger a peek (hold the shortcut key and click a link
 When you do:
 
 1. **The linked page is requested** from its own site, the same way your browser would load it, including your cookies for that site. This is what lets LinkPeek read pages you are signed in to. If the page needs JavaScript, it is opened in a background tab and then closed.
-2. **The page's text** (or the PDF), its address, title and the text of the link you clicked are **sent to your AI provider** together with your format prompt, to produce the summary. Follow-up questions send the same page again along with the conversation so far.
+2. **In "Your key" mode, the page's text** (or the PDF), its address, title and the text of the link you clicked are **sent to your AI provider** together with your format prompt, to produce the summary. Follow-up questions send the same page again along with the conversation so far.
+   **In Keyless mode**, the same material is handed to Chrome's built-in AI on your computer instead, and goes no further. (If Chrome does not have that model yet, it downloads it once, about 4 GB, from Google. Chrome starts this only after a click, so it begins with your first click on LinkPeek's settings page while Keyless is chosen, or with your first peek. That download is Chrome's own and carries nothing about you or the pages you read.)
 
 3. **The site's icon** is requested from the linked site (the icon the page declares, or its `/favicon.ico`), without your cookies, once per site per browser session.
-4. **For the reputation meter**, the site's host name, publisher name, author and page title are sent to your AI provider in a separate small request, once per source per browser session. The page text is not part of that request. You can turn the meter off in the settings, under Advanced.
+4. **For the reputation meter**, the site's host name, publisher name, author and page title are sent to your AI provider in a separate small request, once per source per browser session. The page text is not part of that request. You can turn the meter off in the settings, under Advanced. In Keyless mode the same four facts are given to Chrome's built-in AI on your computer instead, and no request is sent.
 
 Your provider is Anthropic (`api.anthropic.com`) for Claude keys and OpenAI (`api.openai.com`) for OpenAI keys, or the base URL you set under Advanced. What they do with the data is governed by their API terms and your account settings with them.
 
-Be thoughtful about peeking at links to private pages (documents, mail, internal tools): their content goes to your AI provider just like any other page.
+Be thoughtful about peeking at links to private pages (documents, mail, internal tools) while a key is set: their content goes to your AI provider just like any other page. To keep such pages on your computer, choose Keyless in the settings.
 
 The settings page sends your key to the provider's model-list endpoint to check that it works.
 
@@ -39,6 +42,7 @@ The settings page sends your key to the provider's model-list endpoint to check 
 - A page cannot read the bubble. It is rendered in a closed shadow root, so the summary of one site is not visible to the scripts of another.
 - A page cannot make LinkPeek peek at something: scripted key presses and clicks are ignored.
 - A page can tell that *some* element was added to it while the bubble is open.
+- LinkPeek also runs inside pages that are embedded in other pages (frames), so links in them work. When you press or release the shortcut key, the frames of that one tab tell each other so, through the extension itself. No other key is ever mentioned, nothing leaves your browser, and the pages cannot see or fake it.
 
 ## Permissions
 

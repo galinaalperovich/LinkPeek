@@ -132,6 +132,38 @@ function pieces(text, size = 14) {
   return out;
 }
 
+// About 14,000 words: more than Chrome's built-in model can take in one go.
+// The first and the last section say different things, so a test can tell
+// which part of the page a summary was made from.
+function longPage() {
+  const sections = [];
+  for (let i = 1; i <= 140; i++) {
+    const topic = i === 1 ? 'The lighthouse at Cape Verity was built in 1871 and is painted in red and white bands.'
+      : i === 140 ? 'The final chapter is about the keeper, Ottoline Marsh, who retired in 1998 after forty years.'
+      : `Logbook entry ${i} records the weather, the oil used and the ships that passed during week ${i}.`;
+    sections.push(`<h2>Section ${i}</h2><p>${topic} ${'The lamp was trimmed at dusk, the lens was polished, and the fog signal was tested before the evening watch began. '.repeat(4)}</p>`);
+  }
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>The complete logbook of the Cape Verity lighthouse</title></head>
+    <body><article><h1>The complete logbook of the Cape Verity lighthouse</h1>${sections.join('\n')}</article></body></html>`;
+}
+
+// A page that embeds other pages, the way dashboards, mail readers and
+// claude.ai artifacts do: a frame from the same site, one from another site,
+// a sandboxed one whose link is set to open a new tab, and one too small to
+// hold a bubble. (embedded.example is mapped to this server by the test browser.)
+function framesPage(port) {
+  const boxed = `<!doctype html><p><a id='out' target='_blank' href='http://127.0.0.1:${port}/article.html'>A link in a sandboxed frame, set to open a new tab</a></p>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>A page with embedded pages</title>
+    <style>iframe { display: block; margin: 12px 0; border: 1px solid #bbb; }</style></head><body>
+    <h1>A page with embedded pages</h1>
+    <p><a id="top-link" href="/article.html">A link in the page itself</a></p>
+    <iframe id="same" src="/index.html?same" width="900" height="560"></iframe>
+    <iframe id="cross" src="http://embedded.example:${port}/index.html" width="900" height="560"></iframe>
+    <iframe id="boxed" sandbox="allow-scripts allow-popups" width="900" height="460" srcdoc="${boxed}"></iframe>
+    <iframe id="small" src="/index.html?small" width="280" height="150"></iframe>
+    </body></html>`;
+}
+
 export async function startServer() {
   /** Every model request the extension made: { api, headers, body }. */
   const requests = [];
@@ -241,6 +273,8 @@ export async function startServer() {
         state.faviconByHost[site] = (state.faviconByHost[site] || 0) + 1;
         return send(404, 'text/html; charset=utf-8', '<h1>404 Not Found</h1>');
       }
+      if (url.pathname === '/long.html') return send(200, 'text/html; charset=utf-8', longPage());
+      if (url.pathname === '/frames.html') return send(200, 'text/html; charset=utf-8', framesPage(server.address().port));
       if (url.pathname === '/legacy.html') return send(200, 'text/html', legacyPage());
       if (url.pathname === '/paper.pdf') return send(200, 'application/pdf', PDF);
       if (url.pathname === '/notes.txt') {

@@ -120,7 +120,7 @@ function toBase64(bytes) {
 
 let creatingOffscreen = null;
 
-async function ensureOffscreen() {
+export async function ensureOffscreen() {
   const url = chrome.runtime.getURL(OFFSCREEN_PATH);
   const existing = await chrome.runtime.getContexts({
     contextTypes: ['OFFSCREEN_DOCUMENT'],
@@ -131,7 +131,8 @@ async function ensureOffscreen() {
     .createDocument({
       url: OFFSCREEN_PATH,
       reasons: ['DOM_PARSER'],
-      justification: 'Parse fetched HTML into readable text.',
+      justification:
+        "Parse fetched HTML into readable text, and run Chrome's built-in AI, which service workers cannot reach.",
     })
     .finally(() => {
       creatingOffscreen = null;

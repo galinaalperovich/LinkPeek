@@ -4,6 +4,7 @@ import {
   REPUTATION_LABELS,
   REPUTATION_SYSTEM,
   buildReputationMessages,
+  cautious,
   isRateable,
   parseReputation,
   rateSource,
@@ -118,4 +119,31 @@ test('an unusable answer gives null, not a made-up rating', async () => {
     page: { url: 'https://example.com/' }, provider: 'openai', apiKey: 'sk-x', baseUrl: 'https://api.openai.com/v1', model: 'gpt-6.2-sol',
   });
   assert.equal(rating, null);
+});
+
+test('a small model that admits it does not know the source is taken at its word: Unknown', () => {
+  // Answers of Chrome's built-in model to invented and anonymous sources.
+  for (const reason of [
+    'Unknown outlet, but author appears credible, so moderate trust',
+    "Unknown publisher, but author's credibility is uncertain without more context",
+    "Medium is a platform with varied quality; author's credibility is unknown",
+    'Unfamiliar site with no track record',
+    'Not a well-known source; cannot verify its standards',
+  ]) {
+    assert.deepEqual(cautious({ level: 3, reason }), { level: 0, reason }, reason);
+  }
+});
+
+test('ratings of sources the model does know are left alone', () => {
+  for (const [level, reason] of [
+    [5, 'Reuters is a well-known, reputable news agency with high editorial standards'],
+    [1, 'Known for spreading misinformation and conspiracy theories'],
+    [1, 'Known satirical news source; not intended to be taken literally'],
+    [3, 'Established news outlet with a known conservative slant; potentially opinion-led content'],
+    [4, 'Wikipedia is a generally reliable, collaborative encyclopedia with editorial standards'],
+  ]) {
+    assert.deepEqual(cautious({ level, reason }), { level, reason }, reason);
+  }
+  assert.equal(cautious(null), null);
+  assert.deepEqual(cautious({ level: 0, reason: 'Unknown blog' }), { level: 0, reason: 'Unknown blog' });
 });

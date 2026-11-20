@@ -149,6 +149,25 @@ try {
   await glide(target.x, target.y, 26);
   await sleep(350);
 
+  // The bubble lives in the content script's own world: reach it from there.
+  const cdp = await context.newCDPSession(page);
+  const worlds = new Map();
+  cdp.on('Runtime.executionContextCreated', ({ context: c }) => worlds.set(c.id, c));
+  await cdp.send('Runtime.enable');
+  const inExtension = async (expression) => {
+    const world = [...worlds.values()].find((c) => c.auxData?.type === 'isolated' && String(c.origin).includes(extensionId));
+    const { result } = await cdp.send('Runtime.evaluate', { expression, contextId: world.id, returnByValue: true });
+    return result.value;
+  };
+  // The stand-in for the API is at a local address, and that address is what
+  // the bubble's footer would name. A reader with a Claude key sees the
+  // company's name there, so that is what the recording shows.
+  await sleep(200);
+  await inExtension(`void setInterval(() => {
+    const el = globalThis.__linkpeek?.bubble?.engineEl;
+    if (el && !el.hidden && el.textContent !== 'AI provided by Anthropic') el.textContent = 'AI provided by Anthropic';
+  }, 16)`);
+
   // 2. Hold X, click.
   await page.keyboard.down('x');
   await sleep(550);
@@ -174,15 +193,6 @@ try {
   await sleep(SCRIPT.summary.length / 14 * server.state.chunkDelay + 2200);
 
   // 4. Point at the reputation meter: its explanation appears.
-  const cdp = await context.newCDPSession(page);
-  const worlds = new Map();
-  cdp.on('Runtime.executionContextCreated', ({ context: c }) => worlds.set(c.id, c));
-  await cdp.send('Runtime.enable');
-  const inExtension = async (expression) => {
-    const world = [...worlds.values()].find((c) => c.auxData?.type === 'isolated' && String(c.origin).includes(extensionId));
-    const { result } = await cdp.send('Runtime.evaluate', { expression, contextId: world.id, returnByValue: true });
-    return result.value;
-  };
   const spot = (name) => inExtension(`(() => { const r = globalThis.__linkpeek.bubble.${name}.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
   const meter = await spot('repEl');
   await glide(meter.x, meter.y, 16);

@@ -90,6 +90,19 @@ export function parseReputation(text) {
   return { level, reason: clean(data.reason, 140).replace(/[.\s]+$/, '') };
 }
 
+// A small on-device model breaks the "do not guess" rule in one recognisable
+// way: for a source it has never heard of it answers "3" and says, in its own
+// reason, that it does not know the source ("Unknown outlet, so moderate
+// trust"). Its reason is taken at its word: such a rating becomes "Unknown".
+const ADMITS_NOT_KNOWING =
+  /\b(unknown|unfamiliar|unrecogni[sz]ed|unverified|uncertain|unclear|not (?:recogni[sz]ed|familiar|known|well[- ]known|verifiable|enough)|cannot (?:be )?(?:verif|determin|assess|judg)\w*|no (?:information|data|track record))\b/i;
+
+/** For ratings made by Chrome's built-in model. */
+export function cautious(rating) {
+  if (!rating || rating.level === 0) return rating;
+  return ADMITS_NOT_KNOWING.test(rating.reason) ? { ...rating, level: 0 } : rating;
+}
+
 /**
  * Asks the model. Resolves with `{ level, reason }`, or null when the answer
  * could not be used.
