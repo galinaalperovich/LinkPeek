@@ -8,7 +8,7 @@ Everything to paste into the [Chrome Web Store developer dashboard](https://chro
 2. Build the package: `npm run zip`. It writes `linkpeek-<version>.zip` with only what the extension needs (manifest, icons, `src/`, license).
 3. Register as a developer in the dashboard if you have not (a one-time US$5 fee, paid to Google).
 4. Click **New item**, upload the zip, then fill in the tabs below.
-5. Decide how the reviewer will test it; see [Test instructions](#test-instructions).
+5. Paste the short test instructions; see [Test instructions](#test-instructions).
 6. Submit for review. Extensions that ask for access to all sites get a closer review, so allow extra time.
 
 After it is published, replace the "Install in 2 minutes" section of the README with the store link.
@@ -18,13 +18,13 @@ After it is published, replace the "Install in 2 minutes" section of the README 
 **Title** (from the manifest)
 
 ```
-LinkPeek — AI link summaries
+LinkPeek — Peek at any link. Skip the new tab.
 ```
 
 **Summary** (from the manifest, 132 characters at most)
 
 ```
-Hold X and click any link for an AI summary in a bubble, then ask follow-up questions. You never leave the page.
+Every new tab breaks your focus. Hold X and click a link for an AI summary in a bubble, then ask follow-ups. No tab opened.
 ```
 
 **Description**
@@ -154,7 +154,7 @@ Tick all three certifications:
 **Privacy policy URL**
 
 ```
-https://github.com/galinaalperovich/LinkPeek/blob/main/PRIVACY.md
+https://galinaalperovich.github.io/LinkPeek/privacy.html
 ```
 
 ## Distribution tab
@@ -165,21 +165,10 @@ https://github.com/galinaalperovich/LinkPeek/blob/main/PRIVACY.md
 
 ## Test instructions
 
-On a computer that can run Chrome's built-in AI, the reviewer needs no key: Keyless is chosen by default there. A key is still worth offering for reviewers on other machines. Paste this into the **Test instructions** field, and fill in a key if you are willing to provide one (create a separate key with a low spending limit, and delete it after the review):
+The dashboard's **Test instructions** field takes 500 characters at most. Paste this (464 characters):
 
 ```
-LinkPeek has two modes, chosen in the first box of its settings: "Keyless" (Chrome's built-in AI, on the device, no API key) and "Your key" (the user's own Claude or OpenAI key).
-
-Keyless (Chrome 138+, desktop, on computers that can run Chrome's built-in AI):
-1. After installing, the settings page opens with "Keyless" chosen. If it says "One step left", click anywhere on that page: Chrome then downloads its AI model (about 4 GB, once; Chrome requires a user gesture for this). Wait for "Ready".
-2. Open any article or news page, hold the X key and click a link. A bubble with a summary appears next to the link. The first summary takes 10 to 30 seconds while Chrome's model starts.
-3. Type a question in the box at the bottom of the bubble and press Enter.
-4. Press Esc to close the bubble.
-
-Your key (works on any computer):
-1. In the settings, choose "Your key" and paste this test key into the box: <PASTE A TEST KEY HERE, or write: "Please use any Anthropic or OpenAI API key">
-2. Wait for the green "key works" message, then repeat steps 2 to 4 above.
-3. Hover over the small bar meter in the bubble's header to see the reputation explanation.
-
-If the computer cannot run Chrome's built-in AI, "Your key" is chosen instead, and until a key is pasted the bubble shows "Add your Claude or OpenAI API key in settings to start peeking, or switch to Keyless there." with a button that opens the settings.
+Two modes, chosen in settings. Keyless (default where Chrome 138+ can run its built-in AI): if it says "One step left", click the settings page to start the one-time model download and wait for "Ready". Your key: choose "Your key" and paste an Anthropic or OpenAI key. Then on any article, hold X and click a link: a summary bubble opens (the first Keyless one takes 10-30 s). Ask a question in the box; Esc closes it. Hover the bar meter to see the source rating.
 ```
+
+On a computer that can run Chrome's built-in AI the reviewer needs no key. For reviewers on other machines you can offer a key in the dashboard's separate test account fields: create a new key with a low spending limit just for the review, and delete it once the review is done.

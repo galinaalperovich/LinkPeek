@@ -1,6 +1,6 @@
 # Privacy
 
-_Last updated: November 19, 2026_
+_Last updated: November 20, 2026_
 
 LinkPeek has no server, no account, no analytics and no telemetry. It talks to at most two kinds of hosts: the page you ask it to read, and, only in "Your key" mode, the AI provider your API key belongs to.
 

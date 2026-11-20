@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LinkPeek privacy policy</title>
+    <meta name="description" content="What LinkPeek stores, what it sends and when, and what web pages can see." />
+    <link rel="icon" href="https://raw.githubusercontent.com/galinaalperovich/LinkPeek/main/icons/icon-32.png" />
+    <!-- The same text as PRIVACY.md in the repository root. Change both together. -->
+    <style>
+      :root { --bg: #fbfaf7; --fg: #1b1c1f; --muted: #5d6068; --line: rgba(20, 22, 28, 0.12); --accent: #b36b00; --code: rgba(20, 22, 28, 0.06); }
+      @media (prefers-color-scheme: dark) {
+        :root { --bg: #16171a; --fg: #e9e9ec; --muted: #a3a7b1; --line: rgba(255, 255, 255, 0.14); --accent: #f5a524; --code: rgba(255, 255, 255, 0.08); }
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+      main { max-width: 760px; margin: 0 auto; padding: 48px 16px 80px; }
+      h1 { font-size: 2.2rem; line-height: 1.15; letter-spacing: -0.02em; margin: 0 0 8px; }
+      h2 { font-size: 1.3rem; margin: 2.2em 0 0.6em; padding-top: 1em; border-top: 1px solid var(--line); }
+      p, li { margin: 0 0 0.9em; }
+      li p { margin: 0 0 0.5em; }
+      em { color: var(--muted); }
+      a { color: var(--accent); }
+      code { font: 0.9em ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--code); padding: 0.1em 0.35em; border-radius: 4px; }
+      .table { overflow-x: auto; margin: 0 0 1.2em; }
+      table { border-collapse: collapse; width: 100%; min-width: 560px; font-size: 0.92rem; }
+      th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+      th { font-weight: 600; }
+      .brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 700; color: var(--fg); text-decoration: none; margin-bottom: 28px; }
+      .brand img { width: 28px; height: 28px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <a class="brand" href="https://github.com/galinaalperovich/LinkPeek"><img src="https://raw.githubusercontent.com/galinaalperovich/LinkPeek/main/icons/icon-128.png" alt="" />LinkPeek</a>
+<h1>Privacy</h1>
+<p><em>Last updated: November 20, 2026</em></p>
+<p>LinkPeek has no server, no account, no analytics and no telemetry. It talks to at most two kinds of hosts: the page you ask it to read, and, only in "Your key" mode, the AI provider your API key belongs to.</p>
+<p>You choose the mode in the settings. <strong>In Keyless mode, the page you peek at is not sent to anyone.</strong> The summary and the answers are made by Chrome's built-in AI, a model that runs on your own computer. Bubbles made this way say "AI running on this device"; bubbles made with your key say "AI provided by" and the provider's name. A saved API key is not used in Keyless mode.</p>
+<h2>What is stored, and where</h2>
+<div class="table"><table>
+<thead><tr><th>Data</th><th>Where</th><th>Leaves your device?</th></tr></thead>
+<tbody>
+<tr><td>API key, optional API base URL</td><td>The extension's own IndexedDB database on this device</td><td>Only as the credential on requests to your AI provider</td></tr>
+<tr><td>Keyless or Your key, summary format, model choice, design, shortcut key</td><td><code>chrome.storage.sync</code></td><td>Synced by Chrome to your own signed-in browsers, if you use Chrome sync</td></tr>
+<tr><td>Finished summaries</td><td>The extension's own IndexedDB database on this device, for up to 30 days (at most 300). Each is stored under a hash of the page content, not under its address or text. Nothing is saved from incognito windows.</td><td>No. Clear them any time under Settings, Advanced</td></tr>
+<tr><td>Pages you peek at, your questions, the answers</td><td>Memory only, while the bubble is open</td><td>In "Your key" mode: sent to your AI provider (see below). In Keyless mode: no. Never written to disk by LinkPeek</td></tr>
+</tbody></table></div>
+<p>The API key is deliberately kept out of <code>chrome.storage</code>. Scripts that an extension runs inside web pages can read <code>chrome.storage</code>; they cannot open the extension's IndexedDB database. The key is used only by the extension's service worker.</p>
+<h2>What is sent, and when</h2>
+<p>Nothing is sent until you trigger a peek (hold the shortcut key and click a link, or use the context menu).</p>
+<p>When you do:</p>
+<ol><li><strong>The linked page is requested</strong> from its own site, the same way your browser would load it, including your cookies for that site. This is what lets LinkPeek read pages you are signed in to. If the page needs JavaScript, it is opened in a background tab and then closed.</li>
+<li><p><strong>In "Your key" mode, the page's text</strong> (or the PDF), its address, title and the text of the link you clicked are <strong>sent to your AI provider</strong> together with your format prompt, to produce the summary. Follow-up questions send the same page again along with the conversation so far.</p><p><strong>In Keyless mode</strong>, the same material is handed to Chrome's built-in AI on your computer instead, and goes no further. (If Chrome does not have that model yet, it downloads it once, about 4 GB, from Google. Chrome starts this only after a click, so it begins with your first click on LinkPeek's settings page while Keyless is chosen, or with your first peek. That download is Chrome's own and carries nothing about you or the pages you read.)</p></li></ol>
+<ol><li><strong>The site's icon</strong> is requested from the linked site (the icon the page declares, or its <code>/favicon.ico</code>), without your cookies, once per site per browser session.</li>
+<li><strong>For the reputation meter</strong>, the site's host name, publisher name, author and page title are sent to your AI provider in a separate small request, once per source per browser session. The page text is not part of that request. You can turn the meter off in the settings, under Advanced. In Keyless mode the same four facts are given to Chrome's built-in AI on your computer instead, and no request is sent.</li></ol>
+<p>Your provider is Anthropic (<code>api.anthropic.com</code>) for Claude keys and OpenAI (<code>api.openai.com</code>) for OpenAI keys, or the base URL you set under Advanced. What they do with the data is governed by their API terms and your account settings with them.</p>
+<p>Be thoughtful about peeking at links to private pages (documents, mail, internal tools) while a key is set: their content goes to your AI provider just like any other page. To keep such pages on your computer, choose Keyless in the settings.</p>
+<p>The settings page sends your key to the provider's model-list endpoint to check that it works.</p>
+<h2>What a web page can and cannot see</h2>
+<ul><li>A page cannot read your API key.</li>
+<li>A page cannot read the bubble. It is rendered in a closed shadow root, so the summary of one site is not visible to the scripts of another.</li>
+<li>A page cannot make LinkPeek peek at something: scripted key presses and clicks are ignored.</li>
+<li>A page can tell that <em>some</em> element was added to it while the bubble is open.</li>
+<li>LinkPeek also runs inside pages that are embedded in other pages (frames), so links in them work. When you press or release the shortcut key, the frames of that one tab tell each other so, through the extension itself. No other key is ever mentioned, nothing leaves your browser, and the pages cannot see or fake it.</li></ul>
+<h2>Permissions</h2>
+<p>See the table in the <a href="https://github.com/galinaalperovich/LinkPeek/blob/main/README.md#privacy-and-security">README</a>.</p>
+<h2>Removing your data</h2>
+<p>Uninstalling the extension deletes everything it stored. To remove only the key, clear the API key field in the settings. To remove saved summaries, press Clear under Advanced.</p>
+<h2>Contact</h2>
+<p>Questions or concerns: open an issue at <a href="https://github.com/galinaalperovich/LinkPeek/issues">https://github.com/galinaalperovich/LinkPeek/issues</a>.</p>
+    </main>
+  </body>
+</html>
